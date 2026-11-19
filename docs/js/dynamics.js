@@ -200,7 +200,7 @@ export function mountDynamics(host) {
   const state = {
     project: null, base: null, panel: 'full', active: false, busy: false, needsGeometry: true,
     results: {}, baselines: {}, activeChannel: 'heave_f', current: null, scan: null,
-    group: 'Wheel loads', frame: 0, animation: 0, playbackRate: 1, displacementGain: 1,
+    group: 'Wheel loads', frame: 0, animation: 0, playbackRate: 1, displacementGain: 1, fullLeftView: 'model',
     transfer: { ...transferDefaults }, transferResult: null, generation: 0,
   };
   const shell = el('div', null, 'dynamics-layout');
@@ -496,6 +496,30 @@ export function mountDynamics(host) {
     return panel;
   }
 
+  function fullVehicleLeftPanel(result) {
+    const panel = el('section', null, 'visual-panel full-left-visual');
+    panel.setAttribute('aria-label', 'Vehicle animation and force monitor');
+    const animation = modelPanel(result);
+    const toolbar = animation.querySelector('.visual-toolbar');
+    const plot = animation.querySelector('.plot');
+    const monitor = forceMonitor(result);
+    monitor.querySelector('h3').hidden = true;
+    const [, gain, fit] = toolbar.children;
+    const update = value => {
+      state.fullLeftView = value;
+      const showForces = value === 'forces';
+      plot.hidden = showForces;
+      monitor.hidden = !showForces;
+      gain.hidden = fit.hidden = showForces;
+    };
+    const picker = select('Left panel view', { model: 'Model animation', forces: 'Full vehicle force monitor' }, state.fullLeftView, update);
+    picker.classList.add('compact-control', 'left-view-picker');
+    toolbar.replaceChildren(picker, gain, fit);
+    panel.append(toolbar, plot, monitor);
+    update(state.fullLeftView);
+    return panel;
+  }
+
   async function run(command) {
     if (state.busy) return;
     stopPlayback();
@@ -599,11 +623,10 @@ export function mountDynamics(host) {
     extremaReadout = el('div');
     extremaDetails.append(el('summary', 'Curve extrema'), extremaReadout);
     response.append(thresholdReadout, extremaDetails);
-    visuals.append(modelPanel(result));
     if ((result?.corners ?? sourceWheels()).length === 4) {
       visuals.classList.add('full-vehicle-visuals');
-      visuals.append(forceMonitor(result));
-    }
+      visuals.append(fullVehicleLeftPanel(result));
+    } else visuals.append(modelPanel(result));
     visuals.append(response);
     const transport = el('div', null, 'playback-bar');
     frameLabel = el('output', '0.000 s', 'playback-clock');

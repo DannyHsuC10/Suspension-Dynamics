@@ -148,14 +148,14 @@ tbody tr:hover { background: #f5fafb; }
 .result-controls { display: flex; flex-wrap: wrap; align-items: end; gap: .6rem; }
 .result-controls > .field { flex: 1 1 12rem; max-width: 25rem; }
 .result-note { color: var(--muted); font-size: .875rem; line-height: 1.45; margin: .6rem 0 .75rem; }
-.simulation-visuals { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: .65rem; align-items: stretch; }
+.simulation-visuals { --simulation-plot-height: clamp(14rem, 32vh, 20rem); display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: .65rem; align-items: stretch; }
 .visual-panel { min-width: 0; background: var(--night); color: #eaf1fb; border-radius: 8px; overflow: hidden; }
 .visual-toolbar { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; align-content: center; min-height: 4.7rem; padding: .5rem .65rem; background: var(--night-soft); }
 .visual-toolbar h3 { flex: 1 0 100%; font-size: .9rem; }
 .visual-toolbar button, .visual-toolbar select { font-size: .875rem; padding-block: .25rem; color: #eaf1fb; border-color: #4f6078; background-color: #253550; }
 .visual-toolbar select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'%3E%3Cpath d='m3.5 5.5 3.5 3.5 3.5-3.5' fill='none' stroke='%23d8e8fb' stroke-width='1.6'/%3E%3C/svg%3E"); }
 .visual-toolbar button:enabled:hover { background: #3a4b65; }
-.simulation-visuals .plot canvas { height: clamp(14rem, 32vh, 20rem); }
+.simulation-visuals .plot canvas { height: var(--simulation-plot-height); }
 .compact-control > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .playback-bar { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; margin-top: .8rem; }
 .playback-bar input[type=range] { flex: 1 1 8rem; min-width: 4rem; width: auto; }
@@ -216,12 +216,11 @@ tbody tr:hover { background: #f5fafb; }
 .plot-details .muted { color: #b9cade; line-height: 1.5; }
 .force-monitor { padding: .7rem; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
 .force-monitor > h3 { font-size: .9rem; margin-bottom: .7rem; }
-.full-vehicle-visuals { grid-template-columns: minmax(0, 1fr) minmax(15rem, .9fr) minmax(0, 1.5fr); }
-.full-vehicle-visuals .plot canvas { height: clamp(22rem, 55vh, 38rem); }
-.full-vehicle-visuals > .force-monitor { max-height: calc(clamp(22rem, 55vh, 38rem) + 4.7rem); overflow-y: auto; scrollbar-gutter: stable; }
-.full-vehicle-visuals .monitor-groups { grid-template-columns: minmax(0, 1fr); }
-.full-vehicle-visuals .force-column { grid-template-rows: 1.6rem 6rem auto; }
-.full-vehicle-visuals .force-scale { height: 6rem; }
+.full-vehicle-visuals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.full-left-visual > .force-monitor { height: var(--simulation-plot-height); overflow-y: auto; scrollbar-gutter: stable; border: 0; border-radius: 0; }
+.full-left-visual .monitor-groups { grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); }
+.left-view-picker { margin-right: auto; min-width: 0; }
+.left-view-picker select { max-width: 100%; }
 .monitor-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
 .monitor-group { background: var(--night); color: #eaf1fb; border-radius: 7px; padding: .8rem; min-width: 0; }
 .monitor-group h3 { font-size: .9rem; margin-bottom: .75rem; }
@@ -248,14 +247,9 @@ tbody tr:hover { background: #f5fafb; }
 }
 @media (max-width: 1100px) {
   .component-charts, .transfer-charts { grid-template-columns: minmax(0, 1fr); }
-  .simulation-visuals.full-vehicle-visuals { grid-template-columns: minmax(0, 1fr) minmax(12rem, .9fr); }
-  .full-vehicle-visuals > .response-visual { grid-column: 1 / -1; }
-  .simulation-visuals.full-vehicle-visuals .plot canvas { height: clamp(18rem, 40vh, 26rem); }
-  .full-vehicle-visuals > .force-monitor { max-height: calc(clamp(18rem, 40vh, 26rem) + 4.7rem); }
 }
 @media (max-width: 1100px) {
-  .simulation-visuals { grid-template-columns: minmax(0, 1fr); }
-  .simulation-visuals .plot canvas { height: clamp(13rem, 28vh, 18rem); }
+  .simulation-visuals { --simulation-plot-height: clamp(13rem, 28vh, 18rem); grid-template-columns: minmax(0, 1fr); }
 }
 .dynamics-controls { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; }
 .wide-input { min-width: min(100%, 15rem); }
@@ -291,7 +285,4 @@ tbody tr:hover { background: #f5fafb; }
   .dynamics-layout .work-grid { grid-template-columns: minmax(0, 1fr); }
   .header-row { flex-wrap: wrap; }
   .dynamics-layout .components-workbench { grid-template-columns: minmax(0, 1fr); }
-}
-@media (max-width: 650px) {
-  .simulation-visuals.full-vehicle-visuals { grid-template-columns: minmax(0, 1fr); }
 }
