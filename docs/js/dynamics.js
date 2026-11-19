@@ -1019,59 +1019,83 @@ export function mountDynamics(host) {
 
   function renderLookup() {
     const project = state.project;
-    const section = el('section', null, 'panel data-panel');
-    section.append(el('h2', 'Geometry lookup'), el('p', 'Travel is relative to no-aero static equilibrium. Positive travel is compression.', 'muted'), numberGrid(project.vehicle, geometryFields));
+    const section = el('section', null, 'panel analysis-panel lookup-page');
+    section.append(el('h2', 'Geometry lookup'), el('p', 'Each axle uses its average wheel travel relative to no-aero, no-acceleration static equilibrium. Positive travel is compression.', 'result-note'));
+    const columns = el('div', null, 'lookup-columns');
+    const keys = { roll_center: ['h_rc_f', 'h_rc_r'], anti: ['dive_front', 'lift_rear', 'lift_front', 'squat_rear'] };
+    const names = { roll_center: ['Front roll centre', 'Rear roll centre'],
+      anti: ['Front anti-dive', 'Rear braking anti-lift', 'Front drive anti-lift', 'Rear anti-squat'] };
     project.geometry_tables ??= {};
     project.geometry_modes ??= {};
     for (const [kind, columnNames] of Object.entries(geometryColumns)) {
-      const block = el('section', null, 'border-section');
       const title = kind === 'anti' ? 'Anti geometry' : 'Roll centre';
+      const block = el('section', null, 'lookup-column');
+      const controls = el('div', null, 'lookup-controls stack');
+      const chart = chartCard(title);
+      const caption = el('p', '', 'notice');
+      const units = kind === 'anti' ? 100 : 1000;
       const mode = project.geometry_modes[kind] || (project.geometry_tables[kind] ? 'lookup' : 'fixed');
-      block.append(el('h3', title), select('Data source', { fixed: 'Fixed values', lookup: 'Travel lookup table' }, mode, value => {
-        if (value === 'lookup' && !project.geometry_tables[kind]?.length) {
-          status('Import a lookup table first.', true);
-          fill();
-          return;
+      const draw = () => {
+        let rows;
+        if (mode === 'lookup') {
+          rows = project.geometry_tables[kind];
+          if (!rows?.length) {
+            caption.textContent = 'Import a CSV table to display the relationship.';
+            chart.set({ xLabel: 'Relative static wheel travel (mm)', yLabel: kind === 'anti' ? 'Anti (%)' : 'Height (mm)', series: [] });
+            return;
+          }
+          caption.textContent = `${rows.length} samples · ${fmt(rows[0][0])} to ${fmt(rows.at(-1)[0])} mm`;
+          if (rows.length === 1) rows = [[rows[0][0] - 1, ...rows[0].slice(1)], [rows[0][0] + 1, ...rows[0].slice(1)]];
+        } else {
+          const values = keys[kind].map(key => project.vehicle[key] * units);
+          rows = [-20, 20].map(travel => [travel, ...values]);
+          caption.textContent = kind === 'anti' ? 'Fixed ratios · 0.15 = 15%' : 'Fixed heights shown in millimetres.';
         }
+        chart.set({ xLabel: 'Relative static wheel travel (mm)', yLabel: kind === 'anti' ? 'Anti (%)' : 'Height (mm)',
+          series: names[kind].map((label, index) => ({ label, points: rows.map(row => [row[0], row[index + 1]]) })) });
+      };
+      controls.append(el('h3', title), select(`${title} data source`, { fixed: 'Fixed values', lookup: 'CSV travel lookup' }, mode, value => {
         project.geometry_modes[kind] = value;
         fill();
       }));
-      const saveRows = rows => {
-        project.geometry_tables[kind] = rows;
-        project.geometry_modes[kind] = 'lookup';
-        fill();
-        status(`Applied ${rows.length} lookup samples.`);
-      };
-      const tools = el('div', null, 'dynamics-controls');
-      tools.append(localFile('Import lookup CSV', async file => {
-        try { saveRows((await runtime.request('parseCsv', { kind, text: await file.text() })).rows); }
-        catch (error) { status(error.message, true); }
-      }), button('Download CSV template', () => {
-        const samples = [-25, 0, 25].map(travel => Object.fromEntries(columnNames.map((key, i) => [key, i === 0 ? travel : (kind === 'anti' ? 15 : 25)])));
-        downloadCsv(samples, `${kind}-template.csv`, columnNames);
-      }));
-      const rows = project.geometry_tables[kind];
-      if (rows) tools.append(button('Download current CSV', () => downloadCsv(rows.map(row => Object.fromEntries(columnNames.map((key, i) => [key, row[i]]))), nameOf(project, kind, 'csv'), columnNames)));
-      block.append(tools);
-      if (rows) {
-        tools.append(button('Plot lookup curves', () => {
-          const plot = el('div', null, 'plot');
-          const canvas = el('canvas'); canvas.tabIndex = 0;
-          plot.append(canvas);
-          const old = section.querySelector('.lookup-plot');
-          old?.remove();
-          plot.classList.add('lookup-plot');
-          section.append(plot);
-          viewer?.destroy(); viewer = new EngineeringView(canvas);
-          viewer.setChart({ xLabel: 'Travel (mm)', yLabel: kind === 'anti' ? 'Anti (%)' : 'Roll centre (mm)',
-            series: columnNames.slice(1).map((label, index) => ({ label, points: rows.map(row => [row[0], row[index + 1]]) })) });
+      if (mode === 'fixed') {
+        const fields = el('div', null, 'form-grid');
+        for (const key of keys[kind]) fields.append(number(geometryFields[key], project.vehicle[key], value => {
+          project.vehicle[key] = value; draw();
+        }, { min: kind === 'anti' ? -2 : -10, max: kind === 'anti' ? 2 : 10 }));
+        controls.append(fields);
+      } else {
+        controls.append(localFile('Import lookup CSV', async file => {
+          try {
+            const data = await runtime.request('parseCsv', { kind, text: await file.text() });
+            if (project !== state.project) return;
+            project.geometry_tables[kind] = data.rows;
+            project.geometry_modes[kind] = 'lookup';
+            fill();
+            status(`Imported ${file.name} · ${data.rows.length} samples.`);
+          } catch (error) { status(error.message, true); }
         }));
-        const details = el('details');
-        details.append(el('summary', `${rows.length} samples`), table(columnNames, rows.map(row => row.map(value => fmt(value)))));
+      }
+      const tools = el('div', null, 'dynamics-controls');
+      tools.append(button('Download CSV template', () => {
+        const values = keys[kind].map(key => project.vehicle[key] * units);
+        const rows = [-20, 0, 20].map(travel => Object.fromEntries(columnNames.map((key, index) => [key, index === 0 ? travel : values[index - 1]])));
+        downloadCsv(rows, `${kind}-template.csv`, columnNames);
+      }));
+      const stored = project.geometry_tables[kind];
+      if (stored) tools.append(button('Download current CSV', () => downloadCsv(stored.map(row =>
+        Object.fromEntries(columnNames.map((key, index) => [key, row[index]]))), nameOf(project, kind, 'csv'), columnNames)));
+      controls.append(tools, caption);
+      block.append(controls, chart.panel);
+      if (stored) {
+        const details = el('details', null, 'lookup-samples');
+        details.append(el('summary', `Lookup samples (${stored.length})`), table(columnNames, stored.map(row => row.map(value => fmt(value)))));
         block.append(details);
       }
-      section.append(block);
+      columns.append(block);
+      draw();
     }
+    section.append(columns);
     return section;
   }
 
