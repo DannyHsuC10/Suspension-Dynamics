@@ -544,7 +544,7 @@ export class EngineeringView {
       let path = [];
       series.points.forEach((point, pointIndex) => {
         if (!finitePoint(point, 2)) {
-          stroke(ctx, path, series.color, 2);
+          stroke(ctx, path, series.color, 2, series.dash);
           path = [];
           return;
         }
@@ -555,7 +555,7 @@ export class EngineeringView {
         this.hitAreas.push({ id, label: series.label, x, y, tooltip: point.map(numberLabel) });
         if (this.hovered?.id === id || series.points.length === 1) marker(ctx, x, y, series.color, 4, this.hovered?.id === id);
       });
-      stroke(ctx, path, series.color, 2);
+      stroke(ctx, path, series.color, 2, series.dash);
     });
     if (!this.hitAreas.length && !this.chartSeries.some(series => series.points.some(point => finitePoint(point, 2)))) {
       text(ctx, 'No finite samples to display', (left + right) / 2, (top + bottom) / 2, { align: 'center' });
@@ -573,7 +573,7 @@ export class EngineeringView {
         x = left;
         y += 17;
       }
-      stroke(ctx, [[x, y], [x + 15, y]], series.color, 2);
+      stroke(ctx, [[x, y], [x + 15, y]], series.color, 2, series.dash);
       text(ctx, series.label, x + 21, y, { size: 11 });
       x += width;
     }

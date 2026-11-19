@@ -99,6 +99,12 @@ function fmt(value, precision = 3) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: precision, useGrouping: false }).format(value);
 }
 
+function legacyFrame(project) {
+  const half = project.page_cases?.half_lr ?? project.page_cases?.half;
+  const stored = project.model === 'half_lr' ? project.case.roll_center_frame : half?.case?.roll_center_frame;
+  return { enabled: true, stiffness: 500000, damping: 1.4 * Math.sqrt(500000 * 65), mass: 65, ...stored };
+}
+
 function table(headers, rows) {
   const wrap = el('div', null, 'table-wrap');
   const node = el('table');
@@ -680,7 +686,7 @@ export function mountDynamics(host, { geometry }) {
       wheel.append(el('h3', corner), numberGrid(project.tires[corner], { mu: 'Unsprung mass (kg)', k: 'Vertical stiffness (N/mm)', c: 'Vertical damping (N·s/m)' }));
       corners.append(wheel);
     }
-    project.roll_center_frame ??= project.case.roll_center_frame ?? { enabled: true, stiffness: 500000, damping: 1.4 * Math.sqrt(500000 * 65), mass: 65 };
+    project.roll_center_frame ??= legacyFrame(project);
     const frame = project.roll_center_frame;
     const roll = el('section', null, 'border-section');
     roll.append(el('h3', 'Half-car chassis force path'), check('Enable chassis force compliance', frame.enabled, value => { frame.enabled = value; fill(); }));
@@ -821,6 +827,10 @@ export function mountDynamics(host, { geometry }) {
       try {
         const data = await runtime.request('parseCsv', { kind, text: await file.text() });
         Object.assign(setup, data.curves);
+        if (kind === 'damper') {
+          setup.damper_kind = 'force';
+          setup.damper_ratio = false;
+        }
         fill();
         status(`Loaded ${file.name}.`);
       } catch (error) { status(error.message, true); }
