@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <title>SuspensionDynamicsLab</title>
+  <rect x=".5" y=".5" width="31" height="31" rx="5" fill="#111d31" stroke="#58b2b9" stroke-width=".25" vector-effect="non-scaling-stroke"/>
+  <g fill="none" stroke="#58b2b9" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m7 8 14 3-1 10L7 24m13.5-8H26m0-6v12M12 9l1.5 2-1 2 2.5 1.5-1 2 2.5 1.5-1 2 1.5 2"/>
+    <circle cx="7" cy="8" r="1" fill="#58b2b9"/><circle cx="7" cy="24" r="1" fill="#58b2b9"/>
+  </g>
+</svg>
