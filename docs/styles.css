@@ -165,6 +165,32 @@ tbody tr:hover { background: #f5fafb; }
 .results-details { display: block; padding: .75rem 0 0; margin-top: .8rem; border: 0; border-top: 1px solid var(--line); border-radius: 0; box-shadow: none; }
 .results-details[open] > :not(summary) { margin-top: .8rem; }
 .results-details > summary { font-size: .95rem; }
+.component-charts, .transfer-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; margin-top: .8rem; }
+.component-charts > :first-child { grid-column: 1 / -1; }
+.component-charts .plot canvas, .transfer-charts .plot canvas { height: clamp(14rem, 29vh, 21rem); }
+.component-charts .visual-toolbar, .transfer-charts .visual-toolbar { min-height: 3.2rem; }
+.component-charts .visual-toolbar h3, .transfer-charts .visual-toolbar h3 { flex: 1; }
+.plot-details { padding: .6rem .7rem; font-size: .875rem; background: #18263b; color: #d8e8fb; }
+.plot-details table { font-size: .8rem; }
+.plot-details th, .plot-details td { border-color: #34485e; }
+.plot-details thead { background: #253550; }
+.plot-details tbody tr:hover { background: #253550; }
+.plot-details .muted { color: #b9cade; line-height: 1.5; }
+.force-monitor { margin-top: .85rem; padding-top: .75rem; border-top: 1px solid var(--line); }
+.monitor-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: .65rem; }
+.monitor-group { background: var(--night); color: #eaf1fb; border-radius: 7px; padding: .7rem; min-width: 0; }
+.monitor-group h3 { font-size: .875rem; margin-bottom: .6rem; }
+.monitor-row { display: grid; grid-template-columns: minmax(4rem, 1fr) minmax(2.5rem, 1fr) 5.2rem; align-items: center; gap: .45rem; font-size: .8rem; margin-top: .4rem; }
+.monitor-row output { text-align: right; font-variant-numeric: tabular-nums; }
+.monitor-track { position: relative; height: .4rem; background: #304159; border-radius: 3px; }
+.monitor-track > i { position: absolute; height: 100%; background: #60e0c6; border-radius: 3px; }
+.monitor-track > i[data-negative] { background: #ffbf70; }
+.monitor-track > .monitor-zero { width: 1px; height: .7rem; top: -.15rem; background: #a8b9cd; }
+.motion-readouts .monitor-row { grid-template-columns: minmax(0, 1fr) 5.2rem; }
+.motion-readouts .monitor-track { display: none; }
+@media (max-width: 1100px) {
+  .component-charts, .transfer-charts { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 1100px) {
   .simulation-visuals { grid-template-columns: minmax(0, 1fr); }
   .simulation-visuals .plot canvas { height: clamp(13rem, 28vh, 18rem); }

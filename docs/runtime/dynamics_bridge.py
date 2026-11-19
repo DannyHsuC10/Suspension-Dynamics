@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 import numpy as np
 
 from setup_lab.components import KCSystem
-from setup_lab.engine import prepare_vehicle, simulate
+from setup_lab.engine import prepare_simulation, prepare_vehicle, simulate, wheel_travel_threshold
 from setup_lab.geometry_lookup import read_csv as read_geometry_csv
 from setup_lab.load_transfer import TransferDistribution
 from setup_lab.project import (
@@ -188,9 +188,48 @@ def serialize_result(result):
         "metrics": metrics, "warnings": warnings,
         "steps": result.steps, "corners": result.corners, "motion": result.motion,
         "tender_switches": {key: asdict(switches) for key, switches in result.tender_switches.items()},
-        "wheel_travel_limits": result.wheel_travel_limits, "replay_start": result.replay_start,
+        "wheel_travel_limits": result.wheel_travel_limits, "travel_thresholds": travel_thresholds(result),
+        "replay_start": result.replay_start,
         "signature": result.signature, "project": result.project,
+        "monitor": monitor_groups(result),
     }
+
+
+def monitor_groups(result):
+    def rows(labels):
+        return [{"label": english(label), "signal": english(signal) if signal in result.signals else None}
+                for label, signal in labels]
+
+    modal = [(label, f"{label} 模態／輪端反力 [N]") for label in CHANNELS.values()]
+    return [
+        {"title": "Normal wheel loads (N)", "rows": rows([(c, f"{c} [N]") for c in result.corners])},
+        {"title": "Wheel suspension forces (N)", "rows": rows([(c, f"{c} 輪端懸吊力 [N]") for c in result.corners])},
+        {"title": "Modal channel forces (N)", "rows": rows(modal[:-4])},
+        {"title": "Direct wheel forces (N)", "rows": rows(modal[-4:])},
+        {"title": "Body motion", "rows": rows([(name, name) for name in result.groups["車身"]])},
+    ]
+
+
+def travel_thresholds(result):
+    vehicle, _, _ = prepare_simulation(result.project, lambda: False, lambda _: None)
+    thresholds = []
+    for index, component in vehicle.active:
+        channel = tuple(CHANNELS)[index]
+        limits = []
+        if component.spring_kind == "tender":
+            limits.append(("Tender bind", component.tender_bind_stroke))
+        if component.jounce_rate:
+            limits.append(("Compression stop", component.jounce))
+        if component.rebound_rate:
+            limits.append(("Rebound stop", -component.rebound))
+        for kind, shaft_mm in limits:
+            thresholds.append({
+                "channel": channel, "label": english(CHANNELS[channel]), "kind": kind,
+                "shaft_mm": shaft_mm,
+                "modal_mm": wheel_travel_threshold(component.motion_ratio, 1., shaft_mm),
+                "corners": vehicle.corners, "weights": vehicle.modal[index].tolist(),
+            })
+    return thresholds
 
 
 def open_json(source):
@@ -246,11 +285,14 @@ def load_transfer(project, payload):
         project = project | full
     solver = TransferDistribution(project, options)
     result = solver.load_state(payload.get("ay_g", options["ay"]))
+    bound = max(min(2.5, float(min(solver.lift_limits_g))), abs(options["ay"]), .05)
+    accelerations = np.unique(np.r_[np.linspace(-bound, bound, 81), options["ay"]])
     return result | {
         "roll_gradient": solver.roll_gradient, "roll_stiffness": solver.roll_stiffness,
         "total_roll_stiffness": solver.total_roll_stiffness, "stiffness_share": solver.stiffness_share,
         "static": solver.static, "rc": solver.rc,
         "lift_limits_g": [float(limit) if np.isfinite(limit) else None for limit in solver.lift_limits_g],
+        "sweep": {"ay_g": accelerations, "states": [solver.load_state(float(ay)) for ay in accelerations]},
     }
 
 

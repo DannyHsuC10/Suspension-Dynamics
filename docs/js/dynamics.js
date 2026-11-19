@@ -1,3 +1,4 @@
+import { signalSeries, wheelTravelGuides } from './chart-data.js';
 import { EngineeringView } from './views.js';
 import { buildPlaybackScene } from './dynamics-playback.js';
 import { downloadCsv, downloadPng } from './exports.js';
@@ -213,6 +214,10 @@ export function mountDynamics(host) {
   host.append(shell);
   let viewer;
   let modelViewer;
+  let auxiliaryViews = [];
+  let monitorRows = [];
+  let thresholdReadout;
+  let extremaReadout;
   let pendingActivation;
   let renderedResult;
   let frameLabel;
@@ -228,6 +233,22 @@ export function mountDynamics(host) {
   function status(text, error = false) {
     message.textContent = text;
     message.toggleAttribute('data-error', error);
+  }
+
+  function chartCard(title) {
+    const panel = el('section', null, 'visual-panel');
+    const header = el('div', null, 'visual-toolbar');
+    const plot = el('div', null, 'plot');
+    const canvas = el('canvas'); canvas.tabIndex = 0;
+    let camera;
+    let pending = { xLabel: 'Input', yLabel: 'Result', series: [] };
+    header.append(el('h3', title), button('Fit', () => camera?.reset()));
+    plot.append(canvas); panel.append(header, plot);
+    queueMicrotask(() => {
+      if (!canvas.isConnected) return;
+      camera = new EngineeringView(canvas); auxiliaryViews.push(camera); camera.setChart(pending);
+    });
+    return { panel, set(chart) { pending = chart; camera?.setChart(chart); } };
   }
 
   function persistCase() {
@@ -263,6 +284,11 @@ export function mountDynamics(host) {
     }));
     viewer?.destroy();
     viewer = undefined;
+    for (const chart of auxiliaryViews) chart.destroy();
+    auxiliaryViews = [];
+    monitorRows = [];
+    thresholdReadout = undefined;
+    extremaReadout = undefined;
     modelViewer?.destroy();
     modelViewer = undefined;
     const render = { full: renderRun, half_lr: renderRun, half_fr: renderRun, quarter: renderRun, vehicle: renderVehicle, components: renderComponents,
@@ -583,6 +609,11 @@ export function mountDynamics(host) {
     canvas.setAttribute('aria-label', 'Suspension time response plot');
     plot.append(canvas);
     response.append(chartHeader, plot);
+    thresholdReadout = el('div', null, 'threshold-readout');
+    const extremaDetails = el('details', null, 'plot-details');
+    extremaReadout = el('div');
+    extremaDetails.append(el('summary', 'Curve extrema'), extremaReadout);
+    response.append(thresholdReadout, extremaDetails);
     visuals.append(modelPanel(result), response);
     const transport = el('div', null, 'playback-bar');
     frameLabel = el('output', '0.000 s', 'playback-clock');
@@ -604,6 +635,7 @@ export function mountDynamics(host) {
     transport.append(playButton, previous, next, frameSlider, frameLabel, speed);
     liveMetrics = el('div', null, 'live-wheel-loads');
     panel.append(header, controls, note, visuals, transport, liveMetrics);
+    if (result?.corners.length === 4) panel.append(forceMonitor(result));
     if (state.busy) {
       const running = el('div', null, 'calculation-progress');
       const progress = el('progress', null, 'dynamics-progress');
@@ -634,29 +666,87 @@ export function mountDynamics(host) {
     if (state.mode === 'lp02') modelViewer?.setFrame(result, index);
     else modelViewer?.setScene(buildPlaybackScene(result, index, { gain: state.displacementGain }), { preserveView: preserve, showLabels: true });
     const names = result.groups[state.group] || [];
-    const stride = Math.max(1, Math.floor(result.time.length / 2500));
     const baseline = baselineFor(result);
     const chart = names.map((label, channelIndex) => {
-      const values = result.series[label];
-      return { label, color: plotColours[channelIndex % plotColours.length], points: sampledPairs(result.time, values, stride) };
+      return { ...signalSeries(result, label), color: plotColours[channelIndex % plotColours.length] };
     });
     if (baseline && baseline !== result) for (const [channelIndex, label] of names.entries()) {
       if (!baseline.series[label]) continue;
-      chart.push({ label: `A · ${label}`, color: plotColours[channelIndex % plotColours.length], dash: [6, 5], points: sampledPairs(baseline.time, baseline.series[label], Math.max(1, Math.floor(baseline.time.length / 2500))) });
+      chart.push({ ...signalSeries(baseline, label), label: `A · ${label}`, color: plotColours[channelIndex % plotColours.length], dash: [6, 5] });
     }
     const units = [...new Set(names.map(name => name.match(/\[([^\]]+)\]$/)?.[1]).filter(Boolean))];
-    viewer.setChart({ xLabel: 'Time (s)', yLabel: units.length === 1 ? units[0] : state.group, series: chart, currentX: seconds }, { preserveView: preserve });
+    const thresholds = wheelTravelGuides(result, names);
+    const guideColours = { 'Tender bind': '#ffe082', 'Compression stop': '#ff879e', 'Rebound stop': '#7bd7ff' };
+    const guides = thresholds.map(guide => ({ ...guide, color: guideColours[guide.kind], dash: [6, 4] }));
+    if (baseline && baseline !== result) guides.push(...wheelTravelGuides(baseline, names).map(guide => ({
+      ...guide, label: `A · ${guide.label}`, color: guideColours[guide.kind], dash: [2, 5],
+    })));
+    viewer.setChart({ xLabel: 'Time (s)', yLabel: units.length === 1 ? units[0] : state.group,
+      series: chart, guides, showExtrema: true, currentX: seconds }, { preserveView: preserve });
+    if (!preserve) {
+      extremaReadout.replaceChildren(table(['Signal', 'Point', 'Value', 'Time (s)'], chart.flatMap(series =>
+        series.extrema.map(entry => [series.label, entry.kind, fmt(entry.point[1], 6), fmt(entry.point[0], 6)]))));
+    }
+    thresholdReadout.replaceChildren();
+    if (thresholds.length) {
+      const details = el('details', null, 'plot-details');
+      details.open = state.thresholdsOpen ?? false;
+      details.addEventListener('toggle', () => { state.thresholdsOpen = details.open; });
+      details.append(el('summary', 'Stiffness transition lines'),
+        el('p', 'Dashed lines show Tender bind and active travel stops. Coupled-channel thresholds follow the other wheels’ simulated travel.', 'muted'),
+        table(['Wheel / channel / transition', 'Wheel travel now (mm)'], thresholds.map(guide => [guide.label, fmt(guide.points[index][1])])));
+      thresholdReadout.append(details);
+    }
+    for (const row of monitorRows) {
+      const value = row.values?.[index];
+      row.output.textContent = Number.isFinite(value) ? fmt(value, 2) : '—';
+      const position = Number.isFinite(value) ? Math.max(0, Math.min(1, (value - row.low) / (row.high - row.low))) : row.zero;
+      row.bar.style.left = `${Math.min(position, row.zero) * 100}%`;
+      row.bar.style.width = `${Math.abs(position - row.zero) * 100}%`;
+      row.bar.toggleAttribute('data-negative', value < 0);
+    }
     liveMetrics.replaceChildren(...result.corners.map(corner => {
       const key = Object.keys(result.series).find(label => label === `${corner} [N]` || label.startsWith(`${corner} wheel load`));
       return el('span', `${corner} ${fmt(result.series[key]?.[index], 1)} N`, 'muted');
     }));
   }
 
-  function sampledPairs(time, values, stride) {
-    const points = [];
-    for (let i = 0; i < time.length; i += stride) points.push([time[i], values[i]]);
-    if ((time.length - 1) % stride) points.push([time.at(-1), values.at(-1)]);
-    return points;
+  function forceMonitor(result) {
+    const panel = el('details', null, 'force-monitor');
+    panel.open = state.monitorOpen ?? true;
+    panel.addEventListener('toggle', () => { state.monitorOpen = panel.open; });
+    panel.append(el('summary', 'Full vehicle force monitor'));
+    const groups = el('div', null, 'monitor-groups');
+    for (const group of result.monitor || []) {
+      const section = el('section', null, 'monitor-group');
+      if (group.title === 'Body motion') section.classList.add('motion-readouts');
+      section.append(el('h3', group.title));
+      let extent = 1;
+      let signed = false;
+      for (const item of group.rows) for (const value of result.series[item.signal] || []) {
+        extent = Math.max(extent, Math.abs(value));
+        if (value < 0) signed = true;
+      }
+      const low = signed ? -extent * 1.1 : 0;
+      const high = extent * 1.1;
+      const zero = -low / (high - low);
+      for (const item of group.rows) {
+        const row = el('div', null, 'monitor-row');
+        const track = el('span', null, 'monitor-track');
+        const bar = el('i');
+        const axis = el('i', null, 'monitor-zero');
+        axis.style.left = `${zero * 100}%`;
+        track.append(bar, axis);
+        const output = el('output', '—');
+        output.setAttribute('aria-label', `${group.title} · ${item.label}`);
+        row.append(el('span', item.label), track, output);
+        section.append(row);
+        monitorRows.push({ values: result.series[item.signal], output, bar, low, high, zero });
+      }
+      groups.append(section);
+    }
+    panel.append(groups);
+    return panel;
   }
 
   function stopPlayback() {
@@ -834,32 +924,42 @@ export function mountDynamics(host) {
     }));
     if (tableMode) section.append(componentFile('Import motion ratio CSV', 'mr', setup), el('p', `${setup.mr.length} motion-ratio samples`, 'muted'));
     else section.append(number('Motion ratio', setup.mr[0][1], value => { setup.mr = [[0, value]]; }, { min: .000001 }));
-    const plotHost = el('div', null, 'stack');
-    section.append(button('Plot component curves', async () => {
-      status('Calculating component curves…');
+    const wrapper = el('div', null, 'work-grid run-workbench');
+    section.className = 'panel sidebar';
+    const previews = el('section', null, 'panel analysis-panel');
+    const plots = el('div', null, 'component-charts');
+    const cards = Object.fromEntries(['spring', 'damper', 'mr'].map(key => [key, chartCard({ spring: 'Spring and travel stops', damper: 'Damper force', mr: 'Motion ratio' }[key])]));
+    plots.append(...Object.values(cards).map(card => card.panel));
+    const notes = el('p', '', 'notice');
+    let revision = 0;
+    let timer;
+    const refresh = async () => {
+      if (!previews.isConnected) return;
+      const request = ++revision;
+      notes.textContent = 'Updating component curves…';
       try {
         const curves = await runtime.request('componentCurves', { project: projectSnapshot(), channel });
-        const display = el('div', null, 'figure-panel panel');
-        const chartHeader = el('div', null, 'figure-header');
-        const plot = el('div', null, 'plot');
-        const canvas = el('canvas');
-        canvas.tabIndex = 0;
-        plot.append(canvas);
-        const options = Object.fromEntries(['spring', 'damper', 'mr'].map(key => [key, curves[key].title]));
-        const draw = key => {
+        if (!previews.isConnected || request !== revision) return;
+        for (const key of ['spring', 'damper', 'mr']) {
           const chart = curves[key];
-          viewer.setChart({ xLabel: chart.xlabel, yLabel: chart.ylabel, series: chart.series.map(series => ({ label: chart.title, points: series.x.map((x, i) => [x, series.y[i]]) })) });
-        };
-        chartHeader.append(select('Component curve', options, 'spring', draw), button('Fit view', () => viewer.reset()));
-        display.append(chartHeader, plot);
-        plotHost.replaceChildren(display, el('p', curves.notes.join(' '), 'muted'));
-        viewer?.destroy();
-        viewer = new EngineeringView(canvas);
-        draw('spring');
-        status('');
-      } catch (error) { status(error.message, true); }
-    }), plotHost);
-    return section;
+          cards[key].set({ xLabel: chart.xlabel, yLabel: chart.ylabel,
+            series: chart.series.map(series => ({ label: chart.title, points: series.x.map((x, index) => [x, series.y[index]]) })) });
+        }
+        notes.textContent = curves.notes.join(' ');
+        notes.removeAttribute('data-error');
+      } catch (error) {
+        if (!previews.isConnected || request !== revision) return;
+        notes.textContent = error.message;
+        notes.setAttribute('data-error', '');
+        for (const card of Object.values(cards)) card.set({ xLabel: 'Input', yLabel: 'Result', series: [] });
+      }
+    };
+    section.addEventListener('change', () => { revision++; clearTimeout(timer); timer = setTimeout(refresh, 180); });
+    previews.append(el('h2', 'Component curves'), notes, plots);
+    section.append(button('Refresh curves', refresh));
+    wrapper.append(section, previews);
+    queueMicrotask(refresh);
+    return wrapper;
   }
 
   function damperMode(setup) {
@@ -990,35 +1090,58 @@ export function mountDynamics(host) {
   }
 
   function renderTransfer() {
-    const section = el('section', null, 'panel data-panel');
+    const wrapper = el('div', null, 'work-grid run-workbench');
+    const setup = el('aside', null, 'panel sidebar');
+    const section = el('section', null, 'panel analysis-panel');
     const options = state.transfer;
     const readout = el('div', null, 'stack');
-    const runTransfer = button('Calculate load transfer', async () => {
-      runTransfer.disabled = true;
+    const charts = el('div', null, 'transfer-charts');
+    const cards = Object.fromEntries(['Wheel loads', 'Body roll', 'Transfer distribution', 'Three-path moments'].map(title => [title, chartCard(title)]));
+    charts.append(...Object.values(cards).map(card => card.panel));
+    let revision = 0;
+    let timer;
+    const calculate = async () => {
+      if (!section.isConnected) return;
+      const request = ++revision;
+      calculateButton.disabled = true;
       status('Calculating lateral load transfer…');
       try {
-        const project = projectSnapshot();
-        const result = await runtime.request('loadTransfer', { project, options });
+        const result = await runtime.request('loadTransfer', { project: projectSnapshot(), options: { ...options } });
+        if (!section.isConnected || request !== revision) return;
         state.transferResult = result;
         renderTransferResult(readout, result);
+        const { ay_g: x, states } = result.sweep;
+        const series = (label, values) => ({ label, points: x.map((ay, index) => [ay, values[index]]) });
+        const set = (title, yLabel, lines) => cards[title].set({ xLabel: 'Lateral acceleration (g)', yLabel, currentX: options.ay, series: lines });
+        set('Wheel loads', 'Normal load (N)', wheelPositions.map((corner, index) => series(corner, states.map(row => row.loads[index]))));
+        set('Body roll', 'Roll angle (°)', [series('Body roll', states.map(row => row.roll))]);
+        set('Transfer distribution', 'Inside to outside transfer (N)', ['Front', 'Rear'].map((axle, index) => series(axle, states.map(row => row.lateral[index]))));
+        set('Three-path moments', 'Moment (N·m)', ['Unsprung', 'Geometric', 'Elastic'].flatMap((path, index) =>
+          ['Front', 'Rear'].map((axle, end) => series(`${axle} ${path}`, states.map(row => row.paths[index][end])))));
         status('');
-      } catch (error) { status(error.message, true); }
-      finally { runTransfer.disabled = false; }
-    }, 'primary');
+      } catch (error) { if (section.isConnected && request === revision) status(error.message, true); }
+      finally { if (section.isConnected && request === revision) calculateButton.disabled = false; }
+    };
     const update = () => {
       state.project.load_transfer ??= {};
       state.project.load_transfer.distribution = { ...state.project.load_transfer.distribution, ...options };
       state.transferResult = null;
+      revision++;
       readout.replaceChildren();
+      for (const card of Object.values(cards)) card.set({ xLabel: 'Lateral acceleration (g)', yLabel: 'Result', series: [] });
+      clearTimeout(timer); timer = setTimeout(calculate, 180);
     };
-    const fields = el('div', null, 'form-grid');
-    fields.append(...[
+    const calculateButton = button('Calculate load transfer', calculate, 'primary');
+    setup.append(el('h2', 'Load transfer settings'), ...[
       ['ay', 'Lateral acceleration (g)', -3, 3], ['radius', 'Corner radius (m)', 2, 5000],
       ['height_f', 'Front unsprung CG height (mm)', 0, 2000], ['height_r', 'Rear unsprung CG height (mm)', 0, 2000],
-    ].map(([key, title, min, max]) => number(title, options[key], value => { options[key] = value; update(); }, { min, max })));
-    section.append(el('h2', 'Quasi-static load transfer'), fields, runTransfer, readout);
-    if (state.transferResult) renderTransferResult(readout, state.transferResult);
-    return section;
+    ].map(([key, title, min, max]) => number(title, options[key], value => { options[key] = value; update(); }, { min, max })), calculateButton);
+    const details = el('details', null, 'detail-section');
+    details.append(el('summary', 'Calculation details'), readout);
+    section.append(el('h2', 'Quasi-static load transfer'), charts, details);
+    wrapper.append(setup, section);
+    queueMicrotask(calculate);
+    return wrapper;
   }
 
   function renderTransferResult(holder, result) {

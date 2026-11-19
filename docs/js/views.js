@@ -1,3 +1,5 @@
+import { seriesExtrema } from './chart-data.js';
+
 const palette = {
   background: '#111d31', grid: '#25354b', gridMajor: '#34485e',
   text: '#e5edf5', muted: '#a8b9cd', ground: '#8c9db0',
@@ -246,6 +248,7 @@ export class EngineeringView {
     this.hovered = null;
     this.chartSeries = (chart.series ?? []).map((series, index) => ({
       ...series, color: series.color ?? chartColors[index % chartColors.length],
+      extrema: chart.showExtrema ? series.extrema ?? seriesExtrema(series.points) : [],
     }));
     if (!preserveView || !this.chartBounds) this.fitChart();
     if (!preserveView) this.camera = { ...defaultCamera };
@@ -254,7 +257,7 @@ export class EngineeringView {
   }
 
   fitChart() {
-    const points = this.chartSeries.flatMap(series => series.points.filter(point => finitePoint(point, 2)));
+    const points = [...this.chartSeries, ...(this.chart.guides ?? [])].flatMap(series => series.points.filter(point => finitePoint(point, 2)));
     this.chartBounds = boundsOf(points, { low: [-1, -1], high: [1, 1] });
   }
 
@@ -540,6 +543,24 @@ export class EngineeringView {
       const [x] = transform.screen([this.chart.currentX, 0]);
       stroke(ctx, [[x, top], [x, bottom]], palette.centroid, 1, [4, 5]);
     }
+    const annotations = [];
+    for (const guide of this.chart.guides ?? []) {
+      stroke(ctx, guide.points.filter(point => finitePoint(point, 2)).map(transform.screen), guide.color ?? palette.centroid, 1.2, guide.dash ?? [6, 4]);
+      const endpoint = guide.points.findLast(point => finitePoint(point, 2) && transform.screen(point)[0] <= right);
+      if (!endpoint) continue;
+      const [, py] = transform.screen(endpoint);
+      if (py < top || py > bottom) continue;
+      const label = `${guide.label.startsWith('A ·') ? 'A · ' : ''}${guide.corner} ${guide.kind} ${numberLabel(endpoint[1])} mm`;
+      ctx.font = '11px "Segoe UI", system-ui, sans-serif';
+      const width = Math.min(ctx.measureText(label).width + 8, right - left - 4);
+      const x = right - width - 2;
+      let y = clamp(py - 9, top + 9, bottom - 9);
+      while (annotations.some(box => Math.abs(box.y - y) < 16) && y + 17 < bottom - 9) y += 17;
+      annotations.push({ x, y, width });
+      ctx.fillStyle = '#111d31ed';
+      ctx.fillRect(x, y - 8, width, 16);
+      text(ctx, label, x + 4, y, { size: 11, color: guide.color ?? palette.centroid });
+    }
     this.chartSeries.forEach((series, lineIndex) => {
       let path = [];
       series.points.forEach((point, pointIndex) => {
@@ -557,6 +578,32 @@ export class EngineeringView {
       });
       stroke(ctx, path, series.color, 2, series.dash);
     });
+    for (const series of this.chartSeries) {
+      const unit = series.label.match(/\[([^\]]+)\]$/)?.[1] ?? this.chart.yLabel ?? '';
+      for (const entry of series.extrema ?? []) {
+        const [x, y] = transform.screen(entry.point);
+        if (x < left || x > right || y < top || y > bottom) continue;
+        marker(ctx, x, y, series.color, 4, true);
+        const suffix = this.chart.xLabel === 'Time (s)' ? ` @ ${numberLabel(entry.point[0])} s` : '';
+        const label = `${entry.kind} ${numberLabel(entry.point[1])} ${unit}${suffix}`;
+        ctx.font = '11px "Segoe UI", system-ui, sans-serif';
+        const width = Math.min(ctx.measureText(label).width + 10, right - left - 4);
+        const candidates = [];
+        for (const offset of [-17, 17, -34, 34, -51, 51, -68, 68]) {
+          for (const dx of [8, -width - 8]) candidates.push({
+            x: clamp(x + dx, left + 2, right - width - 2),
+            y: clamp(y + offset, top + 9, bottom - 9), width,
+          });
+        }
+        const box = candidates.find(box => !annotations.some(other =>
+          Math.abs(box.y - other.y) < 17 && box.x < other.x + other.width && box.x + box.width > other.x)) ?? candidates[0];
+        annotations.push(box);
+        stroke(ctx, [[x, y], [clamp(x, box.x, box.x + width), box.y]], series.color, .8);
+        ctx.fillStyle = '#111d31ed';
+        ctx.fillRect(box.x, box.y - 8, width, 16);
+        text(ctx, label, box.x + 5, box.y, { size: 11, color: series.color });
+      }
+    }
     if (!this.hitAreas.length && !this.chartSeries.some(series => series.points.some(point => finitePoint(point, 2)))) {
       text(ctx, 'No finite samples to display', (left + right) / 2, (top + bottom) / 2, { align: 'center' });
     }
