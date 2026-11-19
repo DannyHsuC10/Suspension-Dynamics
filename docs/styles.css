@@ -178,7 +178,7 @@ tbody tr:hover { background: #f5fafb; }
 .plot-details .muted { color: #b9cade; line-height: 1.5; }
 .force-monitor { padding: .7rem; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
 .force-monitor > h3 { font-size: .9rem; margin-bottom: .7rem; }
-.full-vehicle-visuals { grid-template-columns: minmax(0, 1fr) minmax(12rem, .9fr) minmax(0, 1.5fr); }
+.full-vehicle-visuals { grid-template-columns: minmax(0, 1fr) minmax(15rem, .9fr) minmax(0, 1.5fr); }
 .full-vehicle-visuals .plot canvas { height: clamp(22rem, 55vh, 38rem); }
 .full-vehicle-visuals > .force-monitor { max-height: calc(clamp(22rem, 55vh, 38rem) + 4.7rem); overflow-y: auto; scrollbar-gutter: stable; }
 .full-vehicle-visuals .monitor-groups { grid-template-columns: minmax(0, 1fr); }

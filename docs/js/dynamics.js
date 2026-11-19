@@ -703,7 +703,7 @@ export function mountDynamics(host) {
     }
     for (const row of monitorRows) {
       const value = row.values?.[index];
-      row.output.textContent = Number.isFinite(value) ? fmt(value, 2) : '—';
+      row.output.textContent = Number.isFinite(value) ? fmt(value, row.precision) : '—';
       const position = Number.isFinite(value) ? Math.max(0, Math.min(1, (value - row.low) / (row.high - row.low))) : row.zero;
       if (row.bar) {
         row.bar.style.top = `${(1 - Math.max(position, row.zero)) * 100}%`;
@@ -772,7 +772,7 @@ export function mountDynamics(host) {
           row.append(output, track, el('span', item.label, 'force-bar-label'));
         }
         columns.append(row);
-        monitorRows.push({ values: result.series[item.signal], output, bar, low, high, zero });
+        monitorRows.push({ values: result.series[item.signal], output, bar, low, high, zero, precision: bodyMotion ? 2 : 0 });
       }
       chart.append(columns);
       section.append(chart);
