@@ -42,7 +42,7 @@ input[type=number], output, td, dd { font-variant-numeric: tabular-nums; }
 .sr-only, .skip-link:not(:focus) { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .skip-link:focus { position: absolute; z-index: 5; top: .5rem; left: .5rem; background: white; color: var(--ink); padding: .5rem; }
 
-.frame { width: min(100%, 1560px); margin-inline: auto; padding-inline: clamp(.85rem, 3vw, 3rem); }
+.frame { width: min(100%, 1800px); margin-inline: auto; padding-inline: clamp(.85rem, 3vw, 3rem); }
 .masthead { background: var(--night); border-bottom: 4px solid var(--header-line); color: #f4f8fc; }
 .header-row, .brand, .project-bar, .inline-actions { display: flex; align-items: center; gap: .55rem; }
 .header-row { justify-content: space-between; gap: .7rem 1.4rem; padding-block: .9rem; }
@@ -128,8 +128,11 @@ tbody tr:hover { background: #f5fafb; }
 .section-form legend { color: var(--accent); font-weight: 700; padding: 0; margin-bottom: .55rem; }
 .hardpoint-table input { width: 6.3rem; }
 .settings-tabs { display: flex; gap: .4rem; }
-.dynamics-layout { display: grid; gap: .9rem; }
-.dynamics-layout .work-grid { grid-template-columns: minmax(16rem, 20rem) minmax(0, 1fr); }
+.dynamics-layout { display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: .6rem; min-height: 0; }
+.dynamics-subnav { grid-row: 1; }
+.dynamics-layout > .notice { grid-row: 2; }
+.app-content { grid-row: 3; min-width: 0; min-height: 0; }
+.dynamics-layout .work-grid { grid-template-columns: minmax(15.5rem, 18rem) minmax(0, 1fr); }
 .dynamics-layout .notice { white-space: pre-line; }
 .dynamics-layout textarea { resize: vertical; }
 .dynamics-layout input[type=range], .dynamics-progress { width: 100%; }
@@ -137,16 +140,34 @@ tbody tr:hover { background: #f5fafb; }
 .dynamics-subnav button[aria-pressed=true] { background: var(--accent-light); border-color: #79a4af; color: #065c54; }
 .dynamics-subnav { gap: .3rem; }
 .dynamics-subnav button { padding: .36rem .62rem; font-size: .84rem; }
-.simulation-visuals { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.35fr); gap: .8rem; align-items: start; }
-.simulation-visuals .plot canvas { height: clamp(14rem, 35vh, 24rem); }
-.simulation-visuals .figure-header { padding: .65rem .8rem; }
-.model-caption { padding: .65rem .8rem; font-size: .85rem; color: var(--muted); }
-.results-details { display: block; }
+/* The two visualizations share one results panel and one playback row. */
+.analysis-panel { padding: .9rem; }
+.analysis-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem; margin-bottom: .8rem; }
+.result-files { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.result-files select { font-size: .875rem; }
+.result-controls { display: flex; flex-wrap: wrap; align-items: end; gap: .6rem; }
+.result-controls > .field { flex: 1 1 12rem; max-width: 25rem; }
+.result-note { color: var(--muted); font-size: .875rem; line-height: 1.45; margin: .6rem 0 .75rem; }
+.simulation-visuals { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: .65rem; align-items: stretch; }
+.visual-panel { min-width: 0; background: var(--night); color: #eaf1fb; border-radius: 8px; overflow: hidden; }
+.visual-toolbar { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; align-content: center; min-height: 4.7rem; padding: .5rem .65rem; background: var(--night-soft); }
+.visual-toolbar h3 { flex: 1 0 100%; font-size: .9rem; }
+.visual-toolbar button, .visual-toolbar select { font-size: .875rem; padding-block: .25rem; color: #eaf1fb; border-color: #4f6078; background-color: #253550; }
+.visual-toolbar select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'%3E%3Cpath d='m3.5 5.5 3.5 3.5 3.5-3.5' fill='none' stroke='%23d8e8fb' stroke-width='1.6'/%3E%3C/svg%3E"); }
+.visual-toolbar button:enabled:hover { background: #3a4b65; }
+.simulation-visuals .plot canvas { height: clamp(14rem, 32vh, 20rem); }
+.compact-control > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.playback-bar { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; margin-top: .8rem; }
+.playback-bar input[type=range] { flex: 1 1 8rem; min-width: 4rem; width: auto; }
+.playback-clock { font-size: .85rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.live-wheel-loads { display: flex; flex-wrap: wrap; gap: .4rem 1rem; margin-top: .65rem; }
+.calculation-progress { display: flex; align-items: center; gap: .6rem; margin-top: .8rem; }
+.results-details { display: block; padding: .75rem 0 0; margin-top: .8rem; border: 0; border-top: 1px solid var(--line); border-radius: 0; box-shadow: none; }
 .results-details[open] > :not(summary) { margin-top: .8rem; }
-.results-details > summary { font-size: 1.1rem; }
+.results-details > summary { font-size: .95rem; }
 @media (max-width: 1100px) {
   .simulation-visuals { grid-template-columns: minmax(0, 1fr); }
-  .simulation-visuals .plot canvas { height: clamp(13rem, 30vh, 21rem); }
+  .simulation-visuals .plot canvas { height: clamp(13rem, 28vh, 18rem); }
 }
 .dynamics-controls { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; }
 .wide-input { min-width: min(100%, 15rem); }
@@ -167,4 +188,18 @@ tbody tr:hover { background: #f5fafb; }
   .export-bar { justify-content: flex-start; }
   .export-field { min-width: 0; }
   .export-field select { max-width: 100%; }
+}
+
+@media (width > 760px) and (height >= 480px) {
+  body { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100dvh; }
+  .workspace { display: flex; flex-direction: column; min-height: 0; width: 100%; padding-block: .65rem 1rem; }
+  #dynamics-workspace { flex: 1; min-height: 0; }
+  .dynamics-layout { height: 100%; }
+  .app-content { overflow: auto; }
+  .run-workbench { height: 100%; align-items: stretch; }
+  .run-workbench > .sidebar, .run-workbench > .analysis-panel { overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; }
+}
+@media (max-width: 760px) {
+  .dynamics-layout .work-grid { grid-template-columns: minmax(0, 1fr); }
+  .header-row { flex-wrap: wrap; }
 }

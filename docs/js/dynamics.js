@@ -200,7 +200,7 @@ export function mountDynamics(host) {
   const state = {
     project: null, base: null, panel: 'full', active: false, busy: false, needsGeometry: true,
     results: {}, baselines: {}, activeChannel: 'heave_f', current: null, scan: null,
-    mode: 'chart', group: 'Wheel loads', frame: 0, animation: 0, playbackRate: 1, displacementGain: 1,
+    mode: 'playback', group: 'Wheel loads', frame: 0, animation: 0, playbackRate: 1, displacementGain: 1,
     transfer: { ...transferDefaults }, transferResult: null, generation: 0,
   };
   const shell = el('div', null, 'dynamics-layout');
@@ -208,7 +208,7 @@ export function mountDynamics(host) {
   nav.setAttribute('aria-label', 'Dynamics tools');
   const message = el('p', null, 'notice');
   message.setAttribute('role', 'status');
-  const content = el('div');
+  const content = el('div', null, 'app-content');
   shell.append(nav, message, content);
   host.append(shell);
   let viewer;
@@ -429,62 +429,58 @@ export function mountDynamics(host) {
   }
 
   function renderRun() {
-    const wrapper = el('div', null, 'work-grid');
-    const right = el('div', null, 'result-grid');
-    wrapper.append(renderCase(), right);
-    if (state.busy) {
-      const running = el('section', null, 'panel data-panel');
-      const progress = el('progress', null, 'dynamics-progress');
-      progress.id = 'solver-progress';
-      progress.max = 1;
-      progress.setAttribute('aria-label', 'Calculation progress');
-      running.append(el('h2', 'Calculating'), progress, button('Cancel', () => runtime.stop()));
-      right.append(running);
-    }
-    if (state.scan) right.append(scanPanel());
-    const visuals = el('div', null, 'simulation-visuals');
-    visuals.append(modelPanel(state.current));
-    visuals.append(state.current ? resultPanel(state.current) : emptyChartPanel());
-    right.append(visuals);
-    if (state.current) right.append(resultMetrics(state.current));
+    const wrapper = el('div', null, 'work-grid run-workbench');
+    wrapper.append(renderCase(), resultPanel(state.current));
     return wrapper;
   }
 
   function modelPanel(result) {
-    const panel = el('section', null, 'panel figure-panel');
-    const header = el('div', null, 'figure-header');
-    header.append(el('h2', 'Model schematic'), button('Fit model', () => modelViewer?.reset()));
-    const plot = el('div', null, 'plot');
-    const canvas = el('canvas');
-    canvas.tabIndex = 0;
-    plot.append(canvas);
-    panel.append(header, plot);
-    if (!result) panel.append(el('p', 'Initial model layout · Run a simulation to view motion.', 'model-caption'));
-    queueMicrotask(() => {
-      if (!canvas.isConnected) return;
-      modelViewer = new EngineeringView(canvas);
-      const preview = result || {
-        project: structuredClone(state.project), corners: sourceWheels(), time: [0], series: {},
-        motion: [sourceWheels().map(() => [0, 0, 0])],
-      };
-      modelViewer.setScene(buildPlaybackScene(preview, result ? state.frame : 0), { showLabels: true });
+    const panel = el('section', null, 'visual-panel model-visual');
+    panel.setAttribute('aria-label', 'Model animation');
+    const header = el('div', null, 'visual-toolbar');
+    const modes = { playback: 'Schematic' };
+    if (result?.corners.length === 4) modes.lp02 = 'LP02 3D';
+    if (!Object.hasOwn(modes, state.mode)) state.mode = 'playback';
+    header.append(el('h3', 'Model animation'));
+    const display = select('Model view', modes, state.mode, value => {
+      stopPlayback(); state.mode = value; fill();
     });
-    return panel;
-  }
-
-  function emptyChartPanel() {
-    const panel = el('section', null, 'panel figure-panel');
-    const header = el('div', null, 'figure-header');
-    header.append(el('h2', 'Simulation output'));
+    const gain = select('Motion scale', { 1: '1×', 2: '2×', 4: '4×', 8: '8×' }, String(state.displacementGain), value => {
+      state.displacementGain = Number(value);
+      if (result) drawResult(false);
+    });
+    display.classList.add('compact-control');
+    gain.classList.add('compact-control');
+    gain.querySelector('select').disabled = !result || state.mode === 'lp02';
+    header.append(display, gain, button('Fit', () => modelViewer?.reset()));
     const plot = el('div', null, 'plot');
     const canvas = el('canvas');
     canvas.tabIndex = 0;
     plot.append(canvas);
     panel.append(header, plot);
-    queueMicrotask(() => {
+    queueMicrotask(async () => {
       if (!canvas.isConnected) return;
-      viewer = new EngineeringView(canvas);
-      viewer.setChart({ xLabel: 'Time (s)', yLabel: 'Result', series: [] });
+      try {
+        const camera = state.mode === 'lp02' ? new LP02View(canvas) : new EngineeringView(canvas);
+        modelViewer = camera;
+        if (state.mode === 'lp02') {
+          camera.setFrame(result, state.frame);
+          const label = el('p', 'Loading LP02 CAD geometry…', 'plot-message');
+          plot.append(label);
+          await camera.ready;
+          label.remove();
+        } else {
+          const preview = result || {
+            project: structuredClone(state.project), corners: sourceWheels(), time: [0], series: {},
+            motion: [sourceWheels().map(() => [0, 0, 0])],
+          };
+          camera.setScene(buildPlaybackScene(preview, result ? state.frame : 0, { gain: state.displacementGain }), { showLabels: true });
+        }
+      } catch (error) {
+        if (!canvas.isConnected) return;
+        status(`${error.message} Showing schematic playback.`, true);
+        stopPlayback(); state.mode = 'playback'; fill();
+      }
     });
     return panel;
   }
@@ -539,74 +535,91 @@ export function mountDynamics(host) {
   }
 
   function resultPanel(result) {
-    const panel = el('section', null, 'panel figure-panel');
-    const header = el('div', null, 'figure-header');
-    const displays = { chart: 'Time series', playback: 'Schematic playback' };
-    if (result.corners.length === 4) displays.lp02 = 'LP02 3D playback';
-    if (!Object.hasOwn(displays, state.mode)) state.mode = 'chart';
-    header.append(el('h2', 'Simulation output'), select('Display', displays, state.mode, value => { stopPlayback(); state.mode = value; fill(); }));
-    const toolbar = el('div', null, 'plot-toolbar');
-    if (!result.groups[state.group]) state.group = Object.keys(result.groups)[0];
-    if (state.mode === 'chart') {
-      const groups = Object.fromEntries(Object.keys(result.groups).map(key => [key, key]));
-      toolbar.append(select('Signal group', groups, state.group, value => { state.group = value; drawResult(false); }));
-    } else {
-      toolbar.append(el('span', 'Drag to orbit or pan · Scroll to zoom'));
-    }
-    if (state.mode === 'playback') toolbar.append(select('Displacement gain', { 1: '1×', 2: '2×', 4: '4×', 8: '8×' }, String(state.displacementGain), value => {
-      state.displacementGain = Number(value);
-      drawResult(false);
-    }));
-    toolbar.append(button('Fit view', () => viewer?.reset()));
+    const panel = el('section', null, 'panel analysis-panel');
+    panel.setAttribute('aria-label', 'Analysis results');
+    const header = el('div', null, 'analysis-heading');
+    header.append(el('h2', 'Analysis results'));
+    const exports = el('div', null, 'result-files');
+    const format = el('select');
+    format.setAttribute('aria-label', 'Download format');
+    for (const [value, label] of Object.entries({ csv: 'Results CSV', chart: 'Chart PNG', model: 'Model PNG', snapshot: 'Snapshot JSON' })) format.add(new Option(label, value));
+    const downloadButton = button('Download', async () => {
+      try {
+        if (format.value === 'csv') exportResult(result);
+        else if (format.value === 'snapshot') download(`${JSON.stringify(result.project, null, 2)}\n`, nameOf(result.project, 'calculation', 'json'), 'application/json');
+        else {
+          const camera = format.value === 'model' ? modelViewer : viewer;
+          await camera.ready;
+          camera.draw();
+          await downloadPng(camera.canvas, nameOf(result.project, format.value, 'png'));
+        }
+      } catch (error) { status(error.message, true); }
+    });
+    format.disabled = downloadButton.disabled = !result;
+    exports.append(format, downloadButton);
+    header.append(exports);
+    const controls = el('div', null, 'result-controls');
+    const groups = result ? Object.fromEntries(Object.keys(result.groups).map(key => [key, key])) : { empty: 'Run a simulation' };
+    if (result && !result.groups[state.group]) state.group = Object.keys(result.groups)[0];
+    const signals = select('Signal group', groups, result ? state.group : 'empty', value => {
+      state.group = value; drawResult(false);
+    });
+    signals.querySelector('select').disabled = !result;
+    const baseline = button('Set as baseline A', () => {
+      state.baselines[result.project.model] = result;
+      status('Current result saved as baseline A.'); fill();
+    });
+    baseline.disabled = !result;
+    controls.append(signals, baseline);
+    const note = el('p', result ? `${models[result.project.model]} · ${result.time.length.toLocaleString('en-US')} samples` : 'Run a simulation to view motion, compare curves and export results.', 'result-note');
+    const visuals = el('div', null, 'simulation-visuals');
+    const response = el('section', null, 'visual-panel response-visual');
+    response.setAttribute('aria-label', 'Time response');
+    const chartHeader = el('div', null, 'visual-toolbar');
+    chartHeader.append(el('h3', 'Time response'), button('Fit', () => viewer?.reset()));
     const plot = el('div', null, 'plot');
     const canvas = el('canvas');
     canvas.tabIndex = 0;
-    canvas.setAttribute('aria-label', 'Suspension dynamics plot');
+    canvas.setAttribute('aria-label', 'Suspension time response plot');
     plot.append(canvas);
-    const transport = el('div', null, 'data-panel');
-    const timeline = el('div', null, 'dynamics-controls');
-    frameLabel = el('output', '', 'muted');
+    response.append(chartHeader, plot);
+    visuals.append(modelPanel(result), response);
+    const transport = el('div', null, 'playback-bar');
+    frameLabel = el('output', '0.000 s', 'playback-clock');
     frameSlider = el('input');
     frameSlider.type = 'range';
     frameSlider.min = 0;
-    frameSlider.max = result.time.length - 1;
-    frameSlider.value = state.frame;
+    frameSlider.max = result ? result.time.length - 1 : 0;
+    frameSlider.value = result ? state.frame : 0;
     frameSlider.setAttribute('aria-label', 'Playback sample');
     frameSlider.addEventListener('input', () => { stopPlayback(); state.frame = frameSlider.valueAsNumber; drawResult(true); });
     playButton = button('Play', togglePlayback);
-    timeline.append(playButton, button('Previous frame', () => stepFrame(-1)), button('Next frame', () => stepFrame(1)),
-      select('Playback speed', { '0.25': '0.25×', '0.5': '0.5×', '1': '1×', '2': '2×' }, String(state.playbackRate), value => { stopPlayback(); state.playbackRate = Number(value); }), frameLabel);
-    liveMetrics = el('div', null, 'dynamics-controls');
-    transport.append(timeline, frameSlider, liveMetrics);
-    const actions = el('div', null, 'export-bar');
-    actions.append(button('Set as baseline A', () => { state.baselines[result.project.model] = result; status('Current result saved as baseline A.'); fill(); }),
-      button('Download CSV', () => exportResult(result)),
-      button('Download snapshot JSON', () => download(`${JSON.stringify(result.project, null, 2)}\n`, nameOf(result.project, 'calculation', 'json'), 'application/json')),
-      button('Download PNG', async () => {
-        try { await viewer.ready; viewer.draw(); await downloadPng(canvas, nameOf(result.project, 'simulation', 'png')); }
-        catch (error) { status(error.message, true); }
-      }));
-    panel.append(header, toolbar, transport, plot, actions);
-    queueMicrotask(async () => {
+    const previous = button('Previous', () => stepFrame(-1));
+    const next = button('Next', () => stepFrame(1));
+    const speed = select('Playback speed', { '0.25': '0.25×', '0.5': '0.5×', '1': '1×', '2': '2×' }, String(state.playbackRate), value => {
+      stopPlayback(); state.playbackRate = Number(value);
+    });
+    speed.classList.add('compact-control');
+    for (const control of [playButton, previous, next, frameSlider, speed.querySelector('select')]) control.disabled = !result;
+    transport.append(playButton, previous, next, frameSlider, frameLabel, speed);
+    liveMetrics = el('div', null, 'live-wheel-loads');
+    panel.append(header, controls, note, visuals, transport, liveMetrics);
+    if (state.busy) {
+      const running = el('div', null, 'calculation-progress');
+      const progress = el('progress', null, 'dynamics-progress');
+      progress.id = 'solver-progress'; progress.max = 1;
+      progress.setAttribute('aria-label', 'Calculation progress');
+      running.append(progress, button('Cancel', () => runtime.stop()));
+      panel.append(running);
+    }
+    if (state.scan) panel.append(scanPanel());
+    if (result) panel.append(resultMetrics(result));
+    queueMicrotask(() => {
       if (!canvas.isConnected) return;
-      try {
-        const camera = state.mode === 'lp02' ? new LP02View(canvas) : new EngineeringView(canvas);
-        viewer = camera;
-        renderedResult = result;
-        drawResult(false);
-        if (camera.ready) {
-          const label = el('p', 'Loading LP02 CAD geometry…', 'plot-message');
-          plot.append(label);
-          await camera.ready;
-          label.remove();
-        }
-      } catch (error) {
-        if (!canvas.isConnected) return;
-        status(`${error.message} Showing schematic playback.`, true);
-        stopPlayback();
-        state.mode = 'playback';
-        fill();
-      }
+      viewer = new EngineeringView(canvas);
+      renderedResult = result;
+      if (result) drawResult(false);
+      else viewer.setChart({ xLabel: 'Time (s)', yLabel: 'Result', series: [] });
     });
     return panel;
   }
@@ -618,24 +631,21 @@ export function mountDynamics(host) {
     const seconds = result.time[index];
     frameLabel.value = `${fmt(seconds, 4)} s / ${fmt(result.time.at(-1), 4)} s`;
     frameSlider.value = index;
-    modelViewer?.setScene(buildPlaybackScene(result, index, { gain: state.displacementGain }), { preserveView: preserve, showLabels: true });
-    if (state.mode === 'lp02') viewer.setFrame(result, index);
-    else if (state.mode === 'playback') viewer.setScene(buildPlaybackScene(result, index, { gain: state.displacementGain }), { preserveView: preserve, showConstruction: true, showLabels: true });
-    else {
-      const names = result.groups[state.group] || [];
-      const stride = Math.max(1, Math.floor(result.time.length / 2500));
-      const baseline = baselineFor(result);
-      const chart = names.map((label, channelIndex) => {
-        const values = result.series[label];
-        return { label, color: plotColours[channelIndex % plotColours.length], points: sampledPairs(result.time, values, stride) };
-      });
-      if (baseline && baseline !== result) for (const [channelIndex, label] of names.entries()) {
-        if (!baseline.series[label]) continue;
-        chart.push({ label: `A · ${label}`, color: plotColours[channelIndex % plotColours.length], dash: [6, 5], points: sampledPairs(baseline.time, baseline.series[label], Math.max(1, Math.floor(baseline.time.length / 2500))) });
-      }
-      const units = [...new Set(names.map(name => name.match(/\[([^\]]+)\]$/)?.[1]).filter(Boolean))];
-      viewer.setChart({ xLabel: 'Time (s)', yLabel: units.length === 1 ? units[0] : state.group, series: chart, currentX: seconds }, { preserveView: preserve });
+    if (state.mode === 'lp02') modelViewer?.setFrame(result, index);
+    else modelViewer?.setScene(buildPlaybackScene(result, index, { gain: state.displacementGain }), { preserveView: preserve, showLabels: true });
+    const names = result.groups[state.group] || [];
+    const stride = Math.max(1, Math.floor(result.time.length / 2500));
+    const baseline = baselineFor(result);
+    const chart = names.map((label, channelIndex) => {
+      const values = result.series[label];
+      return { label, color: plotColours[channelIndex % plotColours.length], points: sampledPairs(result.time, values, stride) };
+    });
+    if (baseline && baseline !== result) for (const [channelIndex, label] of names.entries()) {
+      if (!baseline.series[label]) continue;
+      chart.push({ label: `A · ${label}`, color: plotColours[channelIndex % plotColours.length], dash: [6, 5], points: sampledPairs(baseline.time, baseline.series[label], Math.max(1, Math.floor(baseline.time.length / 2500))) });
     }
+    const units = [...new Set(names.map(name => name.match(/\[([^\]]+)\]$/)?.[1]).filter(Boolean))];
+    viewer.setChart({ xLabel: 'Time (s)', yLabel: units.length === 1 ? units[0] : state.group, series: chart, currentX: seconds }, { preserveView: preserve });
     liveMetrics.replaceChildren(...result.corners.map(corner => {
       const key = Object.keys(result.series).find(label => label === `${corner} [N]` || label.startsWith(`${corner} wheel load`));
       return el('span', `${corner} ${fmt(result.series[key]?.[index], 1)} N`, 'muted');
@@ -687,7 +697,7 @@ export function mountDynamics(host) {
 
   function resultMetrics(result) {
     const section = el('details', null, 'panel data-panel results-details');
-    section.open = state.resultsOpen ?? true;
+    section.open = state.resultsOpen ?? false;
     section.addEventListener('toggle', () => { state.resultsOpen = section.open; });
     const baseline = baselineFor(result);
     section.append(el('summary', 'Current results'));
