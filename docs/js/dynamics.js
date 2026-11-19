@@ -2,7 +2,6 @@ import { signalSeries, wheelTravelGuides } from './chart-data.js';
 import { EngineeringView } from './views.js';
 import { buildPlaybackScene } from './dynamics-playback.js';
 import { downloadCsv, downloadPng } from './exports.js';
-import { LP02View } from './lp02.js';
 
 const models = { flex: 'Full vehicle · 8 DOF, flexible chassis', rigid: 'Full vehicle · 7 DOF, rigid chassis', half_lr: 'Half vehicle · left/right', half_fr: 'Half vehicle · front/rear', quarter: 'Quarter vehicle · 2 DOF' };
 const scenarios = { bump: 'Road bump or dip', iso_a: 'ISO 8608 Class A', iso_b: 'ISO 8608 Class B', iso_c: 'ISO 8608 Class C', cornering: 'Lateral acceleration', maneuver: 'Braking, acceleration or cornering', combined: 'Bump with acceleration', csv: 'Recorded CSV replay' };
@@ -465,7 +464,6 @@ export function mountDynamics(host) {
     panel.setAttribute('aria-label', 'Model animation');
     const header = el('div', null, 'visual-toolbar');
     const modes = { playback: 'Schematic' };
-    if (result?.corners.length === 4) modes.lp02 = 'LP02 3D';
     if (!Object.hasOwn(modes, state.mode)) state.mode = 'playback';
     header.append(el('h3', 'Model animation'));
     const display = select('Model view', modes, state.mode, value => {
@@ -477,31 +475,23 @@ export function mountDynamics(host) {
     });
     display.classList.add('compact-control');
     gain.classList.add('compact-control');
-    gain.querySelector('select').disabled = !result || state.mode === 'lp02';
+    gain.querySelector('select').disabled = !result;
     header.append(display, gain, button('Fit', () => modelViewer?.reset()));
     const plot = el('div', null, 'plot');
     const canvas = el('canvas');
     canvas.tabIndex = 0;
     plot.append(canvas);
     panel.append(header, plot);
-    queueMicrotask(async () => {
+    queueMicrotask(() => {
       if (!canvas.isConnected) return;
       try {
-        const camera = state.mode === 'lp02' ? new LP02View(canvas) : new EngineeringView(canvas);
+        const camera = new EngineeringView(canvas);
         modelViewer = camera;
-        if (state.mode === 'lp02') {
-          camera.setFrame(result, state.frame);
-          const label = el('p', 'Loading LP02 CAD geometry…', 'plot-message');
-          plot.append(label);
-          await camera.ready;
-          label.remove();
-        } else {
-          const preview = result || {
-            project: structuredClone(state.project), corners: sourceWheels(), time: [0], series: {},
-            motion: [sourceWheels().map(() => [0, 0, 0])],
-          };
-          camera.setScene(buildPlaybackScene(preview, result ? state.frame : 0, { gain: state.displacementGain }), { showLabels: true });
-        }
+        const preview = result || {
+          project: structuredClone(state.project), corners: sourceWheels(), time: [0], series: {},
+          motion: [sourceWheels().map(() => [0, 0, 0])],
+        };
+        camera.setScene(buildPlaybackScene(preview, result ? state.frame : 0, { gain: state.displacementGain }), { showLabels: true });
       } catch (error) {
         if (!canvas.isConnected) return;
         status(`${error.message} Showing schematic playback.`, true);
@@ -667,8 +657,7 @@ export function mountDynamics(host) {
     const seconds = result.time[index];
     frameLabel.value = `${fmt(seconds, 4)} s / ${fmt(result.time.at(-1), 4)} s`;
     frameSlider.value = index;
-    if (state.mode === 'lp02') modelViewer?.setFrame(result, index);
-    else modelViewer?.setScene(buildPlaybackScene(result, index, { gain: state.displacementGain }), { preserveView: preserve, showLabels: true });
+    modelViewer?.setScene(buildPlaybackScene(result, index, { gain: state.displacementGain }), { preserveView: preserve, showLabels: true });
     const names = result.groups[state.group] || [];
     const baseline = baselineFor(result);
     const chart = names.map((label, channelIndex) => {
