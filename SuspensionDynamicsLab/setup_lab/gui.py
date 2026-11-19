@@ -1,4 +1,4 @@
-"""Offline desktop workspace for vehicle setup, replay and matched A/B runs."""
+"""Offline desktop workspace for vehicle setup, simulation and replay."""
 
 from pathlib import Path
 from queue import Empty, Queue

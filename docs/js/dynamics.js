@@ -199,8 +199,8 @@ export function mountDynamics(host) {
   const runtime = new Runtime();
   const state = {
     project: null, base: null, panel: 'full', active: false, busy: false, needsGeometry: true,
-    results: {}, baselines: {}, activeChannel: 'heave_f', current: null, scan: null,
-    group: 'Wheel loads', frame: 0, animation: 0, playbackRate: 1, displacementGain: 1, fullLeftView: 'model',
+    results: {}, activeChannel: 'heave_f', current: null, scan: null,
+    group: 'Wheel loads', frame: 0, animation: 0, playbackRate: 1, displacementGain: 1, leftViews: {},
     transfer: { ...transferDefaults }, transferResult: null, generation: 0,
   };
   const shell = el('div', null, 'dynamics-layout');
@@ -323,7 +323,6 @@ export function mountDynamics(host) {
     state.transferResult = null;
     state.needsGeometry = false;
     state.results = {};
-    state.baselines = {};
     state.current = null;
     state.scan = null;
     state.panel = modelFamily(normalized.model);
@@ -339,7 +338,6 @@ export function mountDynamics(host) {
     state.transfer = { ...transferDefaults };
     state.transferResult = null;
     state.results = {};
-    state.baselines = {};
     state.current = null;
     state.scan = null;
     state.needsGeometry = true;
@@ -455,28 +453,47 @@ export function mountDynamics(host) {
 
   function renderRun() {
     const wrapper = el('div', null, 'work-grid run-workbench');
-    if (sourceWheels().length === 4) wrapper.classList.add('full-workbench');
     wrapper.append(renderCase(), resultPanel(state.current));
     return wrapper;
   }
 
-  function modelPanel(result) {
-    const panel = el('section', null, 'visual-panel model-visual');
-    panel.setAttribute('aria-label', 'Model animation');
+  function simulationLeftPanel(result, visuals, response, fullVehicle) {
+    const family = state.panel;
+    const monitorTitle = fullVehicle ? 'Full vehicle force monitor' : 'Wheel loads and attitude';
+    const panel = el('section', null, 'visual-panel');
+    panel.setAttribute('aria-label', 'Model animation and force monitor');
     const header = el('div', null, 'visual-toolbar');
-    header.append(el('h3', 'Model animation'));
     const gain = select('Motion scale', { 1: '1×', 2: '2×', 4: '4×', 8: '8×' }, String(state.displacementGain), value => {
       state.displacementGain = Number(value);
       if (result) drawResult(false);
     });
     gain.classList.add('compact-control');
     gain.querySelector('select').disabled = !result;
-    header.append(gain, button('Fit', () => modelViewer?.reset()));
+    const fit = button('Fit', () => modelViewer?.reset());
+    const body = el('div', null, 'simulation-left-content');
     const plot = el('div', null, 'plot');
     const canvas = el('canvas');
     canvas.tabIndex = 0;
     plot.append(canvas);
-    panel.append(header, plot);
+    const monitor = forceMonitor(result, monitorTitle);
+    const update = value => {
+      state.leftViews[family] = value;
+      const showMonitor = value === 'forces';
+      if (fullVehicle) {
+        visuals.classList.toggle('force-overview', showMonitor);
+        response.hidden = showMonitor;
+      }
+      plot.inert = showMonitor;
+      monitor.hidden = !showMonitor;
+      gain.hidden = fit.hidden = showMonitor;
+    };
+    const view = state.leftViews[family] ?? 'model';
+    const picker = select('Left panel view', { model: 'Model animation', forces: monitorTitle }, view, update);
+    picker.classList.add('compact-control', 'left-view-picker');
+    header.append(picker, gain, fit);
+    body.append(plot, monitor);
+    panel.append(header, body);
+    update(view);
     queueMicrotask(() => {
       if (!canvas.isConnected) return;
       try {
@@ -493,32 +510,6 @@ export function mountDynamics(host) {
         stopPlayback(); fill();
       }
     });
-    return panel;
-  }
-
-  function fullVehicleLeftPanel(result, visuals, response) {
-    const panel = el('section', null, 'visual-panel full-left-visual');
-    panel.setAttribute('aria-label', 'Vehicle animation and force monitor');
-    const animation = modelPanel(result);
-    const toolbar = animation.querySelector('.visual-toolbar');
-    const plot = animation.querySelector('.plot');
-    const monitor = forceMonitor(result);
-    monitor.querySelector('h3').hidden = true;
-    const [, gain, fit] = toolbar.children;
-    const update = value => {
-      state.fullLeftView = value;
-      const showForces = value === 'forces';
-      visuals.classList.toggle('force-overview', showForces);
-      response.hidden = showForces;
-      plot.hidden = showForces;
-      monitor.hidden = !showForces;
-      gain.hidden = fit.hidden = showForces;
-    };
-    const picker = select('Left panel view', { model: 'Model animation', forces: 'Full vehicle force monitor' }, state.fullLeftView, update);
-    picker.classList.add('compact-control', 'left-view-picker');
-    toolbar.replaceChildren(picker, gain, fit);
-    panel.append(toolbar, plot, monitor);
-    update(state.fullLeftView);
     return panel;
   }
 
@@ -566,11 +557,6 @@ export function mountDynamics(host) {
     return panel;
   }
 
-  function baselineFor(result) {
-    const baseline = state.baselines[result.project.model];
-    return baseline && JSON.stringify(baseline.signature) === JSON.stringify(result.signature) ? baseline : null;
-  }
-
   function resultPanel(result) {
     const panel = el('section', null, 'panel analysis-panel');
     panel.setAttribute('aria-label', 'Analysis results');
@@ -602,23 +588,8 @@ export function mountDynamics(host) {
       state.group = value; drawResult(false);
     });
     signals.querySelector('select').disabled = !result;
-    const baselineForCurrent = result ? baselineFor(result) : null;
-    const baseline = button(
-      baselineForCurrent ? 'Clear baseline A' : 'Set as baseline A',
-      () => {
-        if (baselineFor(result)) {
-          delete state.baselines[result.project.model];
-          status('Baseline A cleared.');
-        } else {
-          state.baselines[result.project.model] = result;
-          status('Current result saved as baseline A.');
-        }
-        fill();
-      },
-    );
-    baseline.disabled = !result;
-    controls.append(signals, baseline);
-    const note = el('p', result ? `${models[result.project.model]} · ${result.time.length.toLocaleString('en-US')} samples` : 'Run a simulation to view motion, compare curves and export results.', 'result-note');
+    controls.append(signals);
+    const note = el('p', result ? `${models[result.project.model]} · ${result.time.length.toLocaleString('en-US')} samples` : 'Run a simulation to view motion and response curves.', 'result-note');
     const visuals = el('div', null, 'simulation-visuals');
     const response = el('section', null, 'visual-panel response-visual');
     response.setAttribute('aria-label', 'Time response');
@@ -635,11 +606,9 @@ export function mountDynamics(host) {
     extremaReadout = el('div');
     extremaDetails.append(el('summary', 'Curve extrema'), extremaReadout);
     response.append(thresholdReadout, extremaDetails);
-    if ((result?.corners ?? sourceWheels()).length === 4) {
-      visuals.classList.add('full-vehicle-visuals');
-      visuals.append(fullVehicleLeftPanel(result, visuals, response));
-    } else visuals.append(modelPanel(result));
-    visuals.append(response);
+    const fullVehicle = state.panel === 'full';
+    visuals.classList.toggle('full-vehicle-visuals', fullVehicle);
+    visuals.append(simulationLeftPanel(result, visuals, response, fullVehicle), response);
     const transport = el('div', null, 'playback-bar');
     frameLabel = el('output', '0.000 s', 'playback-clock');
     frameSlider = el('input');
@@ -689,21 +658,13 @@ export function mountDynamics(host) {
     frameSlider.value = index;
     modelViewer?.setScene(buildPlaybackScene(result, index, { gain: state.displacementGain }), { preserveView: preserve, showLabels: true });
     const names = result.groups[state.group] || [];
-    const baseline = baselineFor(result);
-    const chart = names.map((label, channelIndex) => {
-      return { ...signalSeries(result, label), color: plotColours[channelIndex % plotColours.length] };
-    });
-    if (baseline && baseline !== result) for (const [channelIndex, label] of names.entries()) {
-      if (!baseline.series[label]) continue;
-      chart.push({ ...signalSeries(baseline, label), label: `A · ${label}`, color: plotColours[channelIndex % plotColours.length], dash: [6, 5] });
-    }
+    const chart = names.map((label, channelIndex) => ({
+      ...signalSeries(result, label), color: plotColours[channelIndex % plotColours.length],
+    }));
     const units = [...new Set(names.map(name => name.match(/\[([^\]]+)\]$/)?.[1]).filter(Boolean))];
     const thresholds = wheelTravelGuides(result, names);
     const guideColours = { 'Tender bind': '#ffe082', 'Compression stop': '#ff879e', 'Rebound stop': '#7bd7ff' };
     const guides = thresholds.map(guide => ({ ...guide, color: guideColours[guide.kind], dash: [6, 4] }));
-    if (baseline && baseline !== result) guides.push(...wheelTravelGuides(baseline, names).map(guide => ({
-      ...guide, label: `A · ${guide.label}`, color: guideColours[guide.kind], dash: [2, 5],
-    })));
     viewer.setChart({ xLabel: 'Time (s)', yLabel: units.length === 1 ? units[0] : state.group,
       series: chart, guides, showExtrema: true, currentX: seconds }, { preserveView: preserve });
     if (!preserve) {
@@ -736,12 +697,11 @@ export function mountDynamics(host) {
     }));
   }
 
-  function forceMonitor(result) {
+  function forceMonitor(result, title) {
     const panel = el('section', null, 'force-monitor');
-    panel.setAttribute('aria-label', 'Full vehicle force monitor');
-    panel.append(el('h3', 'Full vehicle force monitor'));
+    panel.setAttribute('aria-label', title);
     if (!result) {
-      panel.append(el('p', 'Run a simulation to view wheel loads, suspension forces and modal forces.', 'muted'));
+      panel.append(el('p', 'Run a simulation to view wheel loads, suspension forces and body motion.'));
       return panel;
     }
     const groups = el('div', null, 'monitor-groups');
@@ -841,23 +801,16 @@ export function mountDynamics(host) {
     const section = el('details', null, 'panel data-panel results-details');
     section.open = state.resultsOpen ?? false;
     section.addEventListener('toggle', () => { state.resultsOpen = section.open; });
-    const baseline = baselineFor(result);
     section.append(el('summary', 'Current results'));
     const summary = [`Heave acceleration RMS ${fmt(result.metrics.body_rms)} m/s²`, `${result.steps.toLocaleString('en-US')} integration steps`];
-    if (baseline && baseline !== result) summary.push(`RMS B − A ${fmt(result.metrics.body_rms - baseline.metrics.body_rms)} m/s²`);
     section.append(el('p', summary.join(' · '), 'muted'));
     const headers = ['Corner', 'Initial load (N)', 'Minimum load (N)', 'Maximum load (N)', 'Minimum travel (mm)', 'Maximum travel (mm)', 'Unloaded time (s)'];
-    const compare = baseline && baseline !== result;
-    if (compare) headers.push('Min. load B − A (N)');
     section.append(table(headers, result.corners.map(corner => {
       const [initial, low, high, , minTravel, maxTravel, air] = result.metrics[corner];
-      const row = [corner, ...[initial, low, high, minTravel, maxTravel, air].map(value => fmt(value))];
-      if (compare) row.push(fmt(low - baseline.metrics[corner][1]));
-      return row;
+      return [corner, ...[initial, low, high, minTravel, maxTravel, air].map(value => fmt(value))];
     })));
     if (result.metrics.load_transfer_rate) section.append(table(['Transfer path', 'Peak rate (N/s)', 'Time (s)'], Object.entries(result.metrics.load_transfer_rate).map(([path, [rate, time]]) => [path, fmt(rate), fmt(time)])));
     if (result.warnings?.length) section.append(el('p', result.warnings.join('\n'), 'notice'));
-    if (state.baselines[result.project.model] && !baseline) section.append(el('p', 'Baseline A uses a different model source or input condition.', 'muted'));
     return section;
   }
 

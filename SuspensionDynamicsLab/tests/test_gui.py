@@ -574,7 +574,7 @@ class DesktopTests(unittest.TestCase):
         np.testing.assert_allclose(np.interp(points, series["x"], series["y"]),
                                    [-525. + .1 * rebound * 50., -525., 35. * static, jounce_force, jounce_force + 80.])
 
-    def test_draft_background_run_and_saved_baseline(self):
+    def test_draft_background_run_and_results(self):
         p = default_project()
         p["case"].update(duration=.5, start=.1, dt=.004)
         root, app = self.make_app(p)
@@ -591,16 +591,14 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(app.collect()["channels"]["heave_f"]["compression"], [[0, 1000]])
         app.run()
         self.finish_job(root, app, full)
-        full.pin()
-        baseline = full.result
         app.set_project(p, None)
-        self.assertIs(full.baseline, baseline)
+        self.assertIsNone(full.result)
         app.run()
         self.finish_job(root, app, full)
-        self.assertIs(full.comparison(), baseline)
+        full_result = full.result
         full.group.set("輪荷")
         full.select_group()
-        self.assertEqual(len(full.chart.spec["series"]), 8)
+        self.assertEqual([curve["name"] for curve in full.chart.spec["series"]], list(CORNERS))
 
         app.pages.select(quarter)
         root.update()
@@ -630,8 +628,7 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(limit["y"][0], limit["y"][1])
         self.assertEqual(len(quarter.metrics.get_children()), 1)
         self.assertIsNone(left_right.result)
-        self.assertIsNone(quarter.comparison())
-        self.assertIs(full.comparison(), baseline)
+        self.assertIs(full.result, full_result)
 
         left_right.scenario.set(SCENARIOS["maneuver"])
         left_right.case_mode()
@@ -785,32 +782,26 @@ class DesktopTests(unittest.TestCase):
         root.geometry("1024x690")
         root.deiconify()
         page.set_result(simulate(project))
-        page.pin()
-        project["tires"]["FL"]["k"] *= 1.2
-        page.set_result(simulate(project))
         page.group.set("輪荷")
         page.select_group()
         root.update()
 
-        self.assertIsNotNone(page.comparison())
         curves = page.chart.spec["series"]
-        self.assertEqual([curve["name"] for curve in curves[:2]], ["B FL", "A FL"])
-        for run, markers in ((page.result, curves[2:4]), (page.baseline, curves[4:6])):
-            loads = run.signals["FL [N]"]
-            for marker, index, shape in zip(markers, (np.argmax(loads), np.argmin(loads)), ("triangle_up", "triangle_down")):
-                self.assertEqual((marker["x"], marker["y"]), ([run.time[index]], [loads[index]]))
-                self.assertEqual(marker["marker"], shape)
+        self.assertEqual(len(curves), 3)
+        self.assertEqual(curves[0]["name"], "FL")
+        loads = page.result.signals["FL [N]"]
+        for marker, index, shape in zip(curves[1:], (np.argmax(loads), np.argmin(loads)), ("triangle_up", "triangle_down")):
+            self.assertEqual((marker["x"], marker["y"]), ([page.result.time[index]], [loads[index]]))
+            self.assertEqual(marker["marker"], shape)
         note = page.extrema_note.cget("text")
-        self.assertIn("B FL", note)
-        self.assertIn("A FL", note)
+        self.assertIn("FL", note)
         self.assertIn("▲ 最大", note)
         self.assertIn("▼ 最小", note)
         self.assertIn(f"{page.result.time[np.argmax(page.result.signals['FL [N]'])]:.5f} s", note)
         self.assertTrue(page.extrema_note.winfo_ismapped())
         triangles = [coords for kind, coords, *_ in page.chart.primitives if kind == "line" and len(coords) == 8]
-        self.assertEqual(len(triangles), 4)
+        self.assertEqual(len(triangles), 2)
 
-        page.clear_baseline()
         page.group.set("空力")
         page.select_group()
         page.signal.set("全車下壓力 [N]")
@@ -889,15 +880,12 @@ class DesktopTests(unittest.TestCase):
                 for signal in result.groups[group]:
                     np.testing.assert_allclose([float(row[signal]) for row in rows], result.signals[signal])
 
-        page.pin()
-        project["vehicle"]["h_rc_f"] *= 2
-        page.set_result(simulate(project))
         page.signal.set("輪胎端載重轉移速率 [N/s]")
         page.draw_result()
-        self.assertIn("× B／＋ A", page.extrema_note.cget("text"))
+        self.assertIn("峰值取絕對值最大，保留方向", page.extrema_note.cget("text"))
         self.assertIn("輪胎端峰值", page.extrema_note.cget("text"))
         self.assertNotIn("幾何峰值", page.extrema_note.cget("text"))
-        self.assertEqual([line["marker"] for line in page.chart.spec["series"][2:]], ["x", "+"])
+        self.assertEqual([line["marker"] for line in page.chart.spec["series"][1:]], ["x"])
         page.group.set("輪荷")
         page.select_group()
         self.assertFalse(page.extrema_note.winfo_manager())
@@ -1022,10 +1010,8 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(page.motion.index, index)
             self.assertEqual(page.dashboard.index, index)
             self.assertEqual(page.chart.playback_time, page.result.time[index])
-        left_right.pin()
         self.assertEqual(left_right.result.corners, ("FL", "FR"))
         self.assertEqual(front_rear.result.corners, ("FL", "RL"))
-        self.assertIsNone(front_rear.baseline)
         quarter = app.analysis_pages["quarter"]
         quarter.playback.toggle()
         app.pages.select(app.analysis_pages["full"])

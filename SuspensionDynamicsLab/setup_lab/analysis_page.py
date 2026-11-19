@@ -1,4 +1,4 @@
-"""One model family's case editor, charts and comparison state."""
+"""One model family's case editor and simulation results."""
 
 import csv
 from pathlib import Path
@@ -46,7 +46,7 @@ class AnalysisPage(ttk.Frame):
         super().__init__(app.pages, padding=9)
         self.app, self.family = app, family
         self.models = {model: MODELS[model] for model in PAGE_MODELS[family]}
-        self.result = self.baseline = None
+        self.result = None
         setup = ttk.LabelFrame(self, text="測試工況", padding=10)
         setup.pack(side="left", fill="y", padx=(0, 10))
         self.model, self.scenario, self.target = (tk.StringVar() for _ in range(3))
@@ -95,8 +95,7 @@ class AnalysisPage(ttk.Frame):
         panel.pack(side="left", fill="both", expand=True)
         actions = ttk.Frame(panel)
         actions.pack(fill="x", pady=(0, 5))
-        for label, command in (("設目前結果為 A", self.pin), ("清除 A", self.clear_baseline),
-                               ("匯出 CSV", self.export_csv), ("儲存計算快照", self.export_snapshot)):
+        for label, command in (("匯出 CSV", self.export_csv), ("儲存計算快照", self.export_snapshot)):
             ttk.Button(actions, text=label, command=command).pack(side="left", padx=(0, 4))
         batch_actions = ttk.Frame(panel)
         batch_actions.pack(fill="x", pady=(0, 5))
@@ -353,31 +352,13 @@ class AnalysisPage(ttk.Frame):
         self.dashboard.update_frame(index)
         self.chart.cursor(timestamp)
 
-    def pin(self):
-        if self.result is not None:
-            self.baseline = self.result
-            self.show_result()
-
-    def clear_baseline(self):
-        self.baseline = None
-        self.show_result()
-
-    def comparison(self):
-        if self.baseline is not self.result and self.baseline is not None and self.result is not None:
-            if self.baseline.signature == self.result.signature:
-                return self.baseline
-        return None
-
     def show_result(self):
         self.metrics.delete(*self.metrics.get_children())
         self.details.configure(state="normal")
         self.details.delete("1.0", "end")
-        result, baseline = self.result, self.comparison()
+        result = self.result
         if result is None:
-            label = "尚無結果"
-            if self.baseline is not None:
-                label += f"｜已保留 A：{self.baseline.project['name']}"
-            self.result_label.set(label)
+            self.result_label.set("尚無結果")
             self.group.set("")
             self.signal.set("")
             self.group.configure(values=())
@@ -392,12 +373,6 @@ class AnalysisPage(ttk.Frame):
             label = f"目前｜{result.project['name']} · {MODELS[result.project['model']]}"
             if result.project["model"] in MODEL_SOURCES:
                 label += f" · {'／'.join(result.corners)}"
-            if self.baseline is result:
-                label += "｜已設為 A"
-            elif baseline:
-                label += f"｜A：{baseline.project['name']}"
-            elif self.baseline is not None:
-                label += "｜A 的模型、輪位或工況不同，暫停疊圖"
             self.result_label.set(label)
             for corner in result.corners:
                 values = result.metrics[corner]
@@ -415,10 +390,6 @@ class AnalysisPage(ttk.Frame):
             if peaks := result.metrics.get("load_transfer_rate"):
                 rows = [f"{name}　{rate:+,.1f} N/s　於 {time:.4f} s" for name, (rate, time) in peaks.items()]
                 lines.append("載重轉移速率峰值（絕對值最大，保留方向）\n" + "\n".join(rows))
-            if baseline:
-                lines.append(f"B − A 車身升沉加速度 RMS　{result.metrics['body_rms'] - baseline.metrics['body_rms']:+.3f} m/s²")
-                changes = [f"{c} {result.metrics[c][1] - baseline.metrics[c][1]:+.1f}" for c in result.corners]
-                lines.append("B − A 最低輪荷 (N)　" + "　".join(changes))
             lines.extend(result.warnings or ["本次輸出未觸發零輪荷、限位或大角度警示。"])
             self.details.insert("1.0", "\n\n".join(lines))
             self.group.configure(values=tuple(result.groups))
@@ -445,47 +416,39 @@ class AnalysisPage(ttk.Frame):
         result = self.result
         group, selected = self.group.get(), self.signal.get()
         names = result.groups[group] if selected == "全部" else [selected]
-        baseline = self.comparison()
         series, extrema, extrema_notes = [], [], []
         unit = names[0].rsplit("[", 1)[1][:-1]
         transfer_peaks = self.family == "half_lr" and group in LOAD_TRANSFER_GROUPS
         for index, name in enumerate(names):
             color = COLORS[index % len(COLORS)]
             signal_label = name.split(" [", 1)[0]
-            peak_labels = []
-            for run, prefix, dash in ((result, "B " if baseline else "", ()), (baseline, "A ", (5, 3))):
-                if run and name in run.signals:
-                    y = run.signals[name]
-                    label = prefix + signal_label
-                    if self.family == "quarter":
-                        markers, note = curve_extrema(run.time, y, label, unit, color)
-                        extrema.extend(markers)
-                        extrema_notes.append(note)
-                    elif transfer_peaks:
-                        peak = np.argmax(np.abs(y))
-                        value, time = float(y[peak]), float(run.time[peak])
-                        shape = "+" if run is baseline else "x"
-                        if value:
-                            extrema.append({"x": [time], "y": [value], "marker": shape, "color": color})
-                        peak_labels.append(f"{prefix}{value:+,.4g} {unit}（{time:.4f} s）")
-                    # Retain each bin's minimum and maximum when drawing large recordings.
-                    if len(y) > 3000:
-                        stride = int(np.ceil(len(y) / 1200))
-                        full = len(y) // stride * stride
-                        bins = y[:full].reshape(-1, stride)
-                        starts = np.arange(0, full, stride)
-                        indices = np.unique(np.r_[0, starts + bins.argmin(axis=1), starts + bins.argmax(axis=1),
-                                                  np.arange(full, len(y)), len(y) - 1])
-                    else:
-                        indices = slice(None)
-                    series.append({"name": label, "color": color, "dash": dash,
-                                   "x": run.time[indices].tolist(), "y": y[indices].tolist()})
-            if peak_labels:
-                extrema_notes.append(f"{signal_label.removesuffix(group)}峰值　" + "　".join(peak_labels))
+            y = result.signals[name]
+            if self.family == "quarter":
+                markers, note = curve_extrema(result.time, y, signal_label, unit, color)
+                extrema.extend(markers)
+                extrema_notes.append(note)
+            elif transfer_peaks:
+                peak = np.argmax(np.abs(y))
+                value, time = float(y[peak]), float(result.time[peak])
+                if value:
+                    extrema.append({"x": [time], "y": [value], "marker": "x", "color": color})
+                extrema_notes.append(f"{signal_label.removesuffix(group)}峰值　{value:+,.4g} {unit}（{time:.4f} s）")
+            # Retain each bin's minimum and maximum when drawing large recordings.
+            if len(y) > 3000:
+                stride = int(np.ceil(len(y) / 1200))
+                full = len(y) // stride * stride
+                bins = y[:full].reshape(-1, stride)
+                starts = np.arange(0, full, stride)
+                indices = np.unique(np.r_[0, starts + bins.argmin(axis=1), starts + bins.argmax(axis=1),
+                                          np.arange(full, len(y)), len(y) - 1])
+            else:
+                indices = slice(None)
+            series.append({"name": signal_label, "color": color,
+                           "x": result.time[indices].tolist(), "y": y[indices].tolist()})
         if self.extrema_note is not None:
             if extrema_notes:
                 if transfer_peaks:
-                    extrema_notes.insert(0, "峰值取絕對值最大，保留方向" + ("　× B／＋ A" if baseline else ""))
+                    extrema_notes.insert(0, "峰值取絕對值最大，保留方向")
                 self.extrema_note.configure(text="\n".join(extrema_notes))
                 self.extrema_note.pack(fill="x", before=self.chart, pady=(0, 4))
             else:
@@ -498,71 +461,64 @@ class AnalysisPage(ttk.Frame):
                     by_wheel = {name: COLORS[index] for index, name in enumerate(names)}
                     axle_colors = {key: by_wheel[signal] for key, corner in zip(("heave_f", "heave_r"), result.corners)
                                    if (signal := f"{corner} 輪端行程 [mm]") in by_wheel}
-                self.draw_travel_limits(series, result, baseline, axle_colors)
-                self.draw_tender_switches(series, result, baseline, axle_colors)
+                self.draw_travel_limits(series, result, axle_colors)
+                self.draw_tender_switches(series, result, axle_colors)
         series.extend(extrema)
         self.chart.set({"title": group, "xlabel": "時間 (s)", "ylabel": unit, "series": series})
 
-    def draw_travel_limits(self, series, result, baseline, axle_colors):
+    def draw_travel_limits(self, series, result, axle_colors):
         styles = {"compression": ("壓縮限位", "#fb7185"), "rebound": ("伸長限位", "#67e8f9")}
-        for run, prefix, dash in ((result, "B " if baseline else "", (10, 3)), (baseline, "A ", (4, 3, 1, 3))):
-            if run is None:
+        for key, limits in result.wheel_travel_limits.items():
+            if axle_colors is not None and key not in axle_colors:
                 continue
-            for key, limits in run.wheel_travel_limits.items():
-                if axle_colors is not None and key not in axle_colors:
-                    continue
-                for direction, travel in limits.items():
-                    label, color = styles[direction]
-                    line_dash = dash
-                    if axle_colors is not None:
-                        color = axle_colors[key]
-                        if direction == "rebound":
-                            line_dash = (2, 3, 6, 3) if run is baseline else (2, 4)
-                    series.append({"name": f"{prefix}{CHANNELS[key]}{label} {travel:.3g} mm", "color": color,
-                                   "dash": line_dash, "x": [float(run.time[0]), float(run.time[-1])], "y": [travel, travel]})
+            for direction, travel in limits.items():
+                label, color = styles[direction]
+                dash = (10, 3)
+                if axle_colors is not None:
+                    color = axle_colors[key]
+                    if direction == "rebound":
+                        dash = (2, 4)
+                series.append({"name": f"{CHANNELS[key]}{label} {travel:.3g} mm", "color": color,
+                               "dash": dash, "x": [float(result.time[0]), float(result.time[-1])], "y": [travel, travel]})
 
-    def draw_tender_switches(self, series, result, baseline, axle_colors):
+    def draw_tender_switches(self, series, result, axle_colors):
         notes = []
         markers = []
-        for run, prefix, colors, dash in ((result, "B " if baseline else "", (COLORS[1], COLORS[2], COLORS[5]), (6, 4)),
-                                          (baseline, "A ", (COLORS[3], COLORS[4], "#e2e8f0"), (2, 4))):
-            if run is None:
-                continue
+        if axle_colors is not None:
+            for key in axle_colors:
+                limits = result.wheel_travel_limits.get(key, {})
+                info = result.tender_switches.get(key)
+                thresholds = [f"{label} {limits[direction]:.3g}" for direction, label in
+                              (("compression", "壓縮"), ("rebound", "伸長")) if direction in limits]
+                if info is not None:
+                    thresholds.append(f"併圈 {info.wheel_threshold_mm:.3g}")
+                if thresholds:
+                    notes.append(f"{CHANNELS[key]}（mm）　" + "　".join(thresholds))
+        for (key, info), color in zip(result.tender_switches.items(), (COLORS[1], COLORS[2], COLORS[5])):
             if axle_colors is not None:
-                for key in axle_colors:
-                    limits = run.wheel_travel_limits.get(key, {})
-                    info = run.tender_switches.get(key)
-                    thresholds = [f"{label} {limits[direction]:.3g}" for direction, label in
-                                  (("compression", "壓縮"), ("rebound", "伸長")) if direction in limits]
-                    if info is not None:
-                        thresholds.append(f"併圈 {info.wheel_threshold_mm:.3g}")
-                    if thresholds:
-                        notes.append(f"{prefix}{CHANNELS[key]}（mm）　" + "　".join(thresholds))
-            for (key, info), color in zip(run.tender_switches.items(), colors):
-                if axle_colors is not None:
-                    if key not in axle_colors:
-                        continue
-                    color = axle_colors[key]
-                threshold = info.wheel_threshold_mm
-                name = prefix + CHANNELS[key]
-                series.append({"name": name + "併圈門檻", "color": color, "dash": dash,
-                               "x": [float(run.time[0]), float(run.time[-1])], "y": [threshold, threshold]})
-                binding, release = info.binding_times, info.release_times
-                for times, marker in ((binding, "+"), (release, "x")):
-                    if len(times):
-                        markers.append({"color": color, "marker": marker, "marker_only": True,
-                                        "x": times.tolist(), "y": [threshold] * len(times)})
-                if axle_colors is not None:
+                if key not in axle_colors:
                     continue
-                count = len(binding) + len(release)
-                initial = "主簧段" if info.starts_bound else "串聯段"
-                span = "起始" if count else "全程"
-                note = (f"{name} 門檻 {threshold:.3g} mm（無空力靜態後 {threshold - info.wheel_reference_mm:+.3g} mm）"
-                        f"｜{span}{initial}｜{count} 次切換")
-                if count:
-                    first = release[0] if info.starts_bound else binding[0]
-                    note += f"｜首次 {first:.4f} s"
-                notes.append(note)
+                color = axle_colors[key]
+            threshold = info.wheel_threshold_mm
+            name = CHANNELS[key]
+            series.append({"name": name + "併圈門檻", "color": color, "dash": (6, 4),
+                           "x": [float(result.time[0]), float(result.time[-1])], "y": [threshold, threshold]})
+            binding, release = info.binding_times, info.release_times
+            for times, marker in ((binding, "+"), (release, "x")):
+                if len(times):
+                    markers.append({"color": color, "marker": marker, "marker_only": True,
+                                    "x": times.tolist(), "y": [threshold] * len(times)})
+            if axle_colors is not None:
+                continue
+            count = len(binding) + len(release)
+            initial = "主簧段" if info.starts_bound else "串聯段"
+            span = "起始" if count else "全程"
+            note = (f"{name} 門檻 {threshold:.3g} mm（無空力靜態後 {threshold - info.wheel_reference_mm:+.3g} mm）"
+                    f"｜{span}{initial}｜{count} 次切換")
+            if count:
+                first = release[0] if info.starts_bound else binding[0]
+                note += f"｜首次 {first:.4f} s"
+            notes.append(note)
         if notes:
             if markers:
                 notes.append("＋併圈 · × 回到串聯段（依輸出取樣估算）")

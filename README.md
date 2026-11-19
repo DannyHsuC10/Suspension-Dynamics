@@ -6,7 +6,7 @@
 
 | 資料夾 | 用途 |
 | --- | --- |
-| [`SuspensionDynamicsLab/`](SuspensionDynamicsLab/README.md) | 主要的桌面懸吊調校工具。支援全車、半車與 1/4 車模型、工況模擬、A/B 設定比較、曲線與 CSV 匯出。包含 Python/Tkinter 介面、求解器、測試、範例專案及 LP02 車身／車輪 STL；桌面版可用 PyVista 顯示實車 3D。 |
+| [`SuspensionDynamicsLab/`](SuspensionDynamicsLab/README.md) | 主要的桌面懸吊調校工具。支援全車、半車與 1/4 車模型、工況模擬、曲線與 CSV 匯出。包含 Python/Tkinter 介面、求解器、測試、範例專案及 LP02 車身／車輪 STL；桌面版可用 PyVista 顯示實車 3D。 |
 | [`docs/`](docs/README.md) | 發佈到 GitHub Pages 的瀏覽器版工作台。以 JavaScript 介面搭配 Pyodide 在瀏覽器執行模擬，提供車輛設定、全車／半車／1/4 車分析及示意動畫。 |
 | [`dynamics_analyze/`](dynamics_analyze/README.md) | 模組化的懸吊動態分析程式與實驗入口，包含不同車輛模型、K&C 彈簧／阻尼元件、懸吊設定、路面輸入及分析案例。 |
 | [`Suspension_sys/`](Suspension_sys/README.md) | 整合式全車懸吊模型與相關實驗資料，包含車輛狀態、懸吊與幾何力模型、路面輸入、結果視覺化及 STL 展示程式。 |

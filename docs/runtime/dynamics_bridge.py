@@ -201,13 +201,20 @@ def monitor_groups(result):
                 for label, signal in labels]
 
     modal = [(label, f"{label} 模態／輪端反力 [N]") for label in CHANNELS.values()]
-    return [
-        {"title": "Normal wheel loads (N)", "rows": rows([(c, f"{c} [N]") for c in result.corners])},
-        {"title": "Wheel suspension forces (N)", "rows": rows([(c, f"{c} 輪端懸吊力 [N]") for c in result.corners])},
-        {"title": "Modal channel forces (N)", "rows": rows(modal[:-4])},
-        {"title": "Direct wheel forces (N)", "rows": rows(modal[-4:])},
-        {"title": "Body motion", "rows": rows([(name, name) for name in result.groups["車身"]])},
-    ]
+    motion = result.groups["車身"]
+    groups = [{"title": "Normal wheel loads (N)", "rows": rows([(c, f"{c} [N]") for c in result.corners])}]
+    if len(result.corners) == len(CORNERS):
+        groups.extend([
+            {"title": "Wheel suspension forces (N)", "rows": rows([(c, f"{c} 輪端懸吊力 [N]") for c in result.corners])},
+            {"title": "Modal channel forces (N)", "rows": rows(modal[:-len(CORNERS)])},
+            {"title": "Direct wheel forces (N)", "rows": rows(modal[-len(CORNERS):])},
+        ])
+    else:
+        groups.append({"title": "Modal and direct forces (N)",
+                       "rows": rows([(label, signal) for label, signal in modal if signal in result.signals])})
+        motion = [name for name in motion if name.endswith(("[deg]", "[mm]", "[m/s²]"))]
+    groups.append({"title": "Body motion", "rows": rows([(name, name) for name in motion])})
+    return groups
 
 
 def travel_thresholds(result):
