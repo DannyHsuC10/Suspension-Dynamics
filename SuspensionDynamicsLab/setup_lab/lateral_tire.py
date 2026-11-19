@@ -10,21 +10,37 @@ import numpy as np
 
 DEFAULT_TIR = "Hoosier_43075_R20_W8_direct_candidate.tir"
 DEFAULT_TIR_PATH = Path(__file__).with_name("tir") / DEFAULT_TIR
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SHARED_MODEL_ROOTS = (
+    REPO_ROOT / "new",
+    REPO_ROOT.parent / "vehicle-model" / "new",
+    REPO_ROOT.parent / "vehicle" / "Workflow" / "new",
+)
 
 
 @lru_cache(maxsize=1)
 def _load_model():
-    # The lab also runs with its own directory as the working directory.
-    shared = Path(__file__).resolve().parents[2] / "new"
-    if (shared / "Pacejka_tire_model").is_dir() and str(shared) not in sys.path:
-        sys.path.append(str(shared))
+    for shared in SHARED_MODEL_ROOTS:
+        package = shared / "Pacejka_tire_model"
+        if (package / "tir_io.py").is_file() and str(shared) not in sys.path:
+            sys.path.append(str(shared))
     try:
         from Pacejka_tire_model import tir_io
         from Pacejka_tire_model.model import api
-
     except ImportError as exc:
-        raise ValueError(f"無法載入 Pacejka 輪胎模型：{exc}") from exc
+        raise ValueError(f"無法載入 Pacejka 輪胎模型：{exc}。請將 Pacejka_tire_model 放在 "
+                         "SuspensionDynamicsLab 內，或將套件的上層目錄加入 PYTHONPATH。") from exc
     return api, tir_io
+
+
+def default_tir_path():
+    if DEFAULT_TIR_PATH.is_file():
+        return DEFAULT_TIR_PATH
+    for shared in SHARED_MODEL_ROOTS:
+        path = shared / DEFAULT_TIR
+        if path.is_file():
+            return path
+    raise FileNotFoundError(f"請將預設輪胎檔放在 {DEFAULT_TIR_PATH}，或用「匯入 .tir」選擇輪胎檔。")
 
 
 def _load_tire(source):
@@ -34,7 +50,7 @@ def _load_tire(source):
         if source:
             doc = tir_io.TirDocument.from_text(source["text"])
         else:
-            doc = tir_io.read_tir(DEFAULT_TIR_PATH)
+            doc = tir_io.read_tir(default_tir_path())
         tir_io.validate_tir(doc)
         params = doc.model_parameters()
         limit = min(math.pi / 2, -float(params.get("ALPMIN", -math.pi / 2)),
@@ -62,25 +78,35 @@ def import_tir(path):
 
 
 class LateralTire:
-    def __init__(self, pressure_f, pressure_r, source=None):
+    def __init__(self, pressure_f, pressure_r, source=None, *, slip_ratio=0.):
         self.api, self.params, limit, side = _load_tire(source)
         self.pressures = 1000 * np.repeat([pressure_f, pressure_r], 2)
-        # Mirroring the fitted tire reverses the model slip input and Fy output.
+        self.slip_ratio = slip_ratio
+        if slip_ratio != 0.:
+            minimum = float(self.params.get("KPUMIN", -math.inf))
+            maximum = float(self.params.get("KPUMAX", math.inf))
+            if not minimum <= slip_ratio <= maximum:
+                raise ValueError(f"Slip Ratio {slip_ratio:g} 超出輪胎模型適用範圍 [{minimum:g}, {maximum:g}]。")
+        # Mirroring the fitted tire reverses the slip angle and lateral force.
         self.angles = np.linspace(-limit, limit, 2 * math.ceil(limit / .1) + 1)
         self.sides = np.array([1., -1., 1., -1.])
         if side == "right":
             self.sides *= -1.
 
     def curves(self, loads, baseline):
-        """Sample pure Fy at the actual and reference Fz in one call."""
+        """Sample Fy at actual and reference wheel loads using the same slip ratio."""
         fz = np.maximum(0., np.stack((loads, baseline)))[:, :, None]
         sides = self.sides[:, None]
         conditions = self.api.CalculationInput(
-            FZ=fz, SA=-sides * self.angles, SL=0., IA=0.,
+            FZ=fz, SA=-sides * self.angles, SL=self.slip_ratio, IA=0.,
             pressure=self.pressures[:, None], tir_params=self.params,
         )
-        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-            fy = np.where(fz > 0., sides * self.api.calculate_fy0(conditions), 0.)
+        try:
+            with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+                calculate = self.api.calculate_fy if self.slip_ratio else self.api.calculate_fy0
+                fy = np.where(fz > 0., sides * calculate(conditions), 0.)
+        except AttributeError as exc:
+            raise ValueError(f"輪胎模型缺少計算側向力所需的參數：{exc}") from exc
         if not np.isfinite(fy).all():
             raise ValueError("目前輪荷與胎壓下，輪胎模型無法計算有限側向力。")
         return fy

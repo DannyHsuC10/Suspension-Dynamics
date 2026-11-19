@@ -2,6 +2,7 @@ import argparse
 import sys
 import tkinter as tk
 
+from . import DISPLAY_NAME
 from .engine import simulate
 from .analysis_page import write_csv
 from .gui import SetupApp
@@ -9,7 +10,7 @@ from .project import default_project, open_project
 
 
 def main():
-    parser = argparse.ArgumentParser(description="SuspensionSetupLab 懸吊調校")
+    parser = argparse.ArgumentParser(description=f"{DISPLAY_NAME}｜懸吊調校")
     parser.add_argument("--project", help="開啟／匯入 JSON 專案")
     parser.add_argument("--csv", help="直接計算並輸出 CSV")
     args = parser.parse_args()

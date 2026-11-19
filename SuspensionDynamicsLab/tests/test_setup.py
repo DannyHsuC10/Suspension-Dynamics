@@ -4,15 +4,17 @@ from math import sqrt
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 from setup_lab.components import KCSystem
 from setup_lab.engine import Cancelled, EquilibriumError, G, Vehicle, prepare_vehicle, simulate
-from setup_lab.lateral_tire import DEFAULT_TIR_PATH
+from setup_lab.lateral_tire import default_tir_path
 from setup_lab.load_transfer import TransferDistribution, contact_patch
-from setup_lab.project import (CORNERS, compile_project, default_project, import_linear, linear, open_project,
-                               read_recording, save_project, transfer_options, with_static_tender_travel, with_total_limit_rates)
+from setup_lab.project import (CORNERS, compile_project, default_project, import_linear, linear, load_transfer_options,
+                               open_project, read_recording, save_project, transfer_options, with_static_tender_travel,
+                               with_total_limit_rates)
 from setup_lab.road import Road
 from setup_lab.simulation_export import export_simulation
 
@@ -86,7 +88,7 @@ class LoadTransferTests(unittest.TestCase):
 
         from Pacejka_tire_model.model import api
 
-        params = api.load_tir(DEFAULT_TIR_PATH)
+        params = api.load_tir(default_tir_path())
         sides = np.array([1., -1., 1., -1.])
         conditions = api.CalculationInput(FZ=left["loads"], SA=-sides * np.repeat(left["slips"], 2),
                                           pressure=[95000., 95000., 65000., 65000.], tir_params=params)
@@ -97,6 +99,40 @@ class LoadTransferTests(unittest.TestCase):
         np.testing.assert_allclose(left["loads"], lower_pressure["loads"])
         self.assertNotAlmostEqual(left["slips"][0], lower_pressure["slips"][0])
         self.assertAlmostEqual(left["slips"][1], lower_pressure["slips"][1])
+
+    def test_pacejka_combined_slip_solves_the_same_axle_demand(self):
+        project = default_project()
+        pure = TransferDistribution(project, transfer_options({})).at(1.)
+        for ratio in (-.04, .04):
+            with self.subTest(slip_ratio=ratio):
+                model = TransferDistribution(project, transfer_options({"slip_ratio": ratio}))
+                result = model.at(1.)
+                tire = model.tire
+                np.testing.assert_array_equal(result["loads"], pure["loads"])
+                np.testing.assert_allclose(np.sum(np.reshape(result["forces"], (2, 2)), axis=1),
+                                           model.mass * G * model.fractions)
+                self.assertNotAlmostEqual(result["slips"][0], pure["slips"][0])
+                self.assertEqual(model.at(0.)["grip"], [1., 1.])
+                inputs = tire.api.CalculationInput(
+                    FZ=result["loads"], SA=-tire.sides * np.repeat(result["slips"], 2),
+                    SL=ratio, IA=0., pressure=tire.pressures, tir_params=tire.params,
+                )
+                expected = tire.sides * tire.api.calculate_fy(inputs)
+                np.testing.assert_allclose(result["forces"], expected, atol=.5, rtol=0.)
+
+    def test_slip_ratio_options_preserve_a_signed_setting_and_default_legacy_to_zero(self):
+        self.assertEqual(load_transfer_options({"rigid": {"pressure_r": 92.}})["slip_ratio"], 0.)
+        self.assertEqual(load_transfer_options({"distribution": {"slip_ratio": -.06}})["slip_ratio"], -.06)
+        with self.assertRaisesRegex(ValueError, "Slip Ratio"):
+            transfer_options({"slip_ratio": float("nan")})
+
+    def test_quasi_static_loads_can_be_calculated_without_a_tire_model(self):
+        with patch("setup_lab.load_transfer.LateralTire", side_effect=ValueError("缺少輪胎模型")) as load_tire:
+            model = TransferDistribution(default_project(), transfer_options({}))
+            self.assertAlmostEqual(sum(model.load_state(1.)["loads"]), model.mass * G)
+            load_tire.assert_not_called()
+            with self.assertRaisesRegex(ValueError, "缺少輪胎模型"):
+                model.at(1.)
 
     def test_pacejka_reports_no_equilibrium_above_peak_and_zero_force_at_lift(self):
         project = default_project()

@@ -1,5 +1,6 @@
 """Quasi-static lateral load transfer adapted from VehicleLab."""
 
+from functools import cached_property
 import math
 
 import numpy as np
@@ -53,7 +54,12 @@ class TransferDistribution:
         unit_transfer = G * (self.unsprung_moment_per_ay + self.geometry_moment_per_ay
                              + self.elastic_moment_per_ay * self.stiffness_share) / self.track
         self.lift_limits_g = np.divide(self.static[::2], abs(unit_transfer), out=np.full(2, np.inf), where=unit_transfer != 0.)
-        self.tire = LateralTire(options["pressure_f"], options["pressure_r"], options.get("tire_tir"))
+
+    @cached_property
+    def tire(self):
+        options = self.options
+        return LateralTire(options["pressure_f"], options["pressure_r"], options.get("tire_tir"),
+                           slip_ratio=options.get("slip_ratio", 0.))
 
     def load_state(self, ay_g):
         ay = ay_g * G

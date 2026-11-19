@@ -139,15 +139,16 @@ class DesktopTests(unittest.TestCase):
         app.set_project(project, None)
         self.assertEqual(app.aero_page.settings(), project["aero"])
 
-    def test_load_transfer_imports_tir_and_restores_it_without_the_source_file(self):
+    def test_tire_analysis_imports_tir_and_restores_it_without_the_source_file(self):
         _, app = self.make_app(default_project())
-        page = app.transfer_page
+        page = app.tire_analysis_page
         page.draw()
         original = page.contact_model.at(1.)["slips"]
         self.assertEqual(page.tir_name.get(), DEFAULT_TIR)
-        repo = Path(__file__).resolve().parents[2]
-        fixture = repo / "new" / "Pacejka_tire_model" / "tir" / "FSAE_43075R20_W8.tir"
-        base = repo / "SuspensionSetupLab" / ".test-tmp"
+        from Pacejka_tire_model import tir_io
+
+        fixture = Path(tir_io.__file__).with_name("tir") / "FSAE_43075R20_W8.tir"
+        base = Path(__file__).resolve().parents[1] / ".test-tmp"
         base.mkdir(exist_ok=True)
         with TemporaryDirectory(dir=base) as folder:
             source = Path(folder) / "測試輪胎.tir"
@@ -179,7 +180,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(page.contact_model.at(1.)["slips"], original)
         self.assertNotIn("tire_tir", page.options())
 
-    def test_load_transfer_contact_slider_and_legacy_project_settings(self):
+    def test_tire_analysis_contact_slider_and_legacy_project_settings(self):
         p = default_project()
         p["vehicle"]["h_cg"] = .45
         p["aero"].update(enabled=True, reference_force_n=100.)
@@ -190,8 +191,21 @@ class DesktopTests(unittest.TestCase):
         root, app = self.make_app(p)
         tabs = [app.pages.tab(tab, "text").strip() for tab in app.pages.tabs()]
         self.assertIn("載重轉移分配", tabs)
+        self.assertIn("輪胎分析", tabs)
         self.assertNotIn("剛體載重轉移", tabs)
-        page = app.transfer_page
+        transfer = app.transfer_page
+        page = app.tire_analysis_page
+        self.assertEqual(set(transfer.charts), {"輪荷", "側傾", "載重轉移分配", "三路徑力矩"})
+        self.assertEqual(set(page.charts), {"穩態轉向", "不足轉向", "抓地", "接地面"})
+        for key in ("ay", "radius"):
+            self.assertIs(transfer.fields[key], page.fields[key])
+
+        app.pages.select(transfer)
+        app.run()
+        self.assertEqual(len(transfer.wheels.get_children()), 4)
+        self.assertEqual(len(transfer.paths.get_children()), 3)
+        self.assertEqual(len(transfer.charts["三路徑力矩"].spec["series"]), 6)
+
         app.pages.select(page)
         page.views.select(page.contact_view)
         root.geometry("1024x690")
@@ -201,15 +215,13 @@ class DesktopTests(unittest.TestCase):
         chart = page.charts["接地面"]
         self.assertTrue(chart.winfo_ismapped())
         self.assertTrue(page.contact_slider.winfo_ismapped())
-        self.assertEqual(len(page.wheels.get_children()), 4)
-        self.assertEqual(len(page.paths.get_children()), 3)
-        self.assertEqual(len(page.charts["三路徑力矩"].spec["series"]), 6)
         self.assertEqual([series["name"] for series in chart.spec["series"]], list(CORNERS))
         self.assertEqual(page.contact_ay.get(), 1.25)
         self.assertEqual(page.options()["radius"], 30.)
         self.assertEqual(page.options()["pressure_f"], 95.)
         self.assertEqual(page.options()["pressure_r"], 85.)
         self.assertEqual(page.options()["width_r"], 190.)
+        self.assertEqual(page.options()["slip_ratio"], 0.)
         self.assertFalse({"mu", "b", "e"} & page.fields.keys())
         self.assertGreaterEqual(chart.canvas.winfo_width(), 300)
         self.assertGreaterEqual(chart.canvas.winfo_height(), 220)
@@ -227,7 +239,7 @@ class DesktopTests(unittest.TestCase):
         page.contact_slider.set(1.)
         root.update()
         left = contact_rows()
-        distribution = page.contact_model.at(1.)
+        distribution = page.contact_model.load_state(1.)
         for corner, load in zip(CORNERS, distribution["loads"]):
             self.assertAlmostEqual(left[corner][0], load, delta=.051)
         self.assertAlmostEqual(left["FR"][1], distribution["loads"][1] / 95. * 10, delta=.051)
@@ -243,13 +255,26 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(chart.spec["series"][0]["marker"], "x")
 
         page.fields["pressure_f"].set("110")
-        page.fields["ay"].set("1.5")
+        transfer.fields["ay"].set("1.5")
         app.run()
         self.assertEqual(page.contact_ay.get(), 1.5)
-        self.assertAlmostEqual(contact_rows()["FR"][1], page.contact_model.at(1.5)["loads"][1] / 110. * 10, delta=.051)
+        expected_area = page.contact_model.load_state(1.5)["loads"][1] / 110. * 10
+        self.assertAlmostEqual(contact_rows()["FR"][1], expected_area, delta=.051)
+
+        def steer_at_case():
+            curve = page.charts["穩態轉向"].spec["series"][0]
+            return curve["y"][curve["x"].index(1.5)]
+
+        zero_slip_steer = steer_at_case()
+        original_area = contact_rows()["FR"][1]
+        page.fields["slip_ratio"].set("-0.03")
+        app.run()
+        self.assertNotAlmostEqual(steer_at_case(), zero_slip_steer)
+        self.assertEqual(contact_rows()["FR"][1], original_area)
         snapshot = app.collect(include_pages=True)
         self.assertEqual(set(snapshot["load_transfer"]), {"distribution"})
         self.assertEqual(snapshot["load_transfer"]["distribution"]["ay"], 1.5)
+        self.assertEqual(snapshot["load_transfer"]["distribution"]["slip_ratio"], -.03)
         self.assertFalse({"mu", "b", "e"} & snapshot["load_transfer"]["distribution"].keys())
         base = Path(__file__).resolve().parents[1] / ".test-tmp"
         base.mkdir(exist_ok=True)
@@ -259,10 +284,25 @@ class DesktopTests(unittest.TestCase):
             legacy, _ = open_project(path)
             app.set_project(legacy, None)
             self.assertEqual(page.options()["pressure_f"], 95.)
+            self.assertEqual(page.options()["slip_ratio"], 0.)
             save_project(path, snapshot)
             loaded, _ = open_project(path)
             app.set_project(loaded, None)
             self.assertEqual(page.options()["pressure_f"], 110.)
+            self.assertEqual(page.options()["slip_ratio"], -.03)
+
+    def test_tire_contact_and_load_transfer_can_draw_without_pacejka(self):
+        _, app = self.make_app(default_project())
+        transfer, tires = app.transfer_page, app.tire_analysis_page
+        with patch("setup_lab.lateral_tire._load_model", side_effect=ValueError("無法載入 Pacejka")) as load_model:
+            transfer.draw()
+            load_model.assert_not_called()
+            self.assertIsNotNone(transfer.charts["輪荷"].spec)
+            tires.draw()
+            load_model.assert_called_once()
+        self.assertIsNotNone(tires.charts["接地面"].spec)
+        self.assertEqual(len(tires.contact_wheels.get_children()), 4)
+        self.assertIsNone(tires.charts["穩態轉向"].spec)
 
     def test_geometry_csv_import_is_saved_and_used_by_simulation(self):
         p = default_project()

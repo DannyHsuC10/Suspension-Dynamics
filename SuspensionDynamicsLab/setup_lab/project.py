@@ -11,6 +11,7 @@ from .geometry_lookup import validate_geometry
 from .road_profiles import ISO_FREQUENCY_BAND, ISO_ROUGHNESS
 
 
+# Application identifier stored in project JSON files.
 APP = "SuspensionSetupLab"
 CORNERS = ("FL", "FR", "RL", "RR")
 CHANNELS = {
@@ -41,6 +42,7 @@ AERO_FIELDS = {"reference_speed_kmh": ("參考車速 (km/h)", .1, 540),
 TIRE_PRESSURE_FIELDS = {
     "pressure_f": ("前胎壓 (kPa)", 80., 1, 1000), "pressure_r": ("後胎壓 (kPa)", 80., 1, 1000),
 }
+TIRE_ANALYSIS_FIELDS = TIRE_PRESSURE_FIELDS | {"slip_ratio": ("Slip Ratio（比例）", 0., None, None)}
 CONTACT_FIELDS = {
     "width_f": ("前胎寬 (mm)", 180., 1, 1000), "width_r": ("後胎寬 (mm)", 180., 1, 1000),
 }
@@ -342,7 +344,7 @@ def transfer_options(values):
     if not isinstance(values, dict):
         raise ValueError("載重轉移設定格式有誤。")
     options = {key: number(values.get(key, default), label, low, high)
-               for key, (label, default, low, high) in (TRANSFER_FIELDS | CONTACT_FIELDS).items()}
+               for key, (label, default, low, high) in (TRANSFER_FIELDS | TIRE_ANALYSIS_FIELDS | CONTACT_FIELDS).items()}
     if "tire_tir" in values:
         source = values["tire_tir"]
         if (not isinstance(source, dict) or set(source) != {"name", "text"}

@@ -8,6 +8,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import numpy as np
 
+from . import DISPLAY_NAME
 from .analysis_page import AnalysisPage
 from .aero_page import AeroPage
 from .chart_base import Chart
@@ -15,8 +16,8 @@ from .components import DAMPER_DIRECTIONS, DAMPER_STAGE_COUNTS, KCSystem, damper
 from .engine import Cancelled, prepare_vehicle, simulate
 from .geometry_lookup import VEHICLE_KEYS as GEOMETRY_VEHICLE_KEYS
 from .geometry_page import GeometryPage
-from .load_transfer_page import LoadTransferPage
-from .project import (AERO_DEFAULTS, APP, CHANNELS, COMPONENT_FIELDS, CORNERS, DAMPER_FORCE_LABELS,
+from .load_transfer_page import LoadTransferPage, TireAnalysisPage
+from .project import (AERO_DEFAULTS, CHANNELS, COMPONENT_FIELDS, CORNERS, DAMPER_FORCE_LABELS,
                       DEFAULT_DAMPER_SWITCH_SPEED, DEFAULT_SOURCES, MODEL_PAGE, MODEL_SOURCES, PAGE_MODELS, ROLL_FRAME_FIELDS,
                       TIRE_FIELDS, VEHICLE_FIELDS, analysis_page_cases, channel_enabled, compile_project, damping_reference_mass,
                       default_project, load_transfer_options, model_channels, model_corners, open_project, project_roll_frame,
@@ -87,7 +88,7 @@ class SetupApp:
         self.path = path
         self.job = self.running_page = self.analysis = None
         self.events = Queue()
-        root.title(f"{APP}｜懸吊調校")
+        root.title(f"{DISPLAY_NAME}｜懸吊調校")
         root.geometry("1270x830")
         root.minsize(1024, 690)
         root.option_add("*Font", "{Microsoft JhengHei UI} 10")
@@ -114,6 +115,8 @@ class SetupApp:
         self.pages.add(self.aero_page, text="  空力  ")
         self.transfer_page = LoadTransferPage(self)
         self.pages.add(self.transfer_page, text="  載重轉移分配  ")
+        self.tire_analysis_page = TireAnalysisPage(self, self.transfer_page)
+        self.pages.add(self.tire_analysis_page, text="  輪胎分析  ")
         self.build_components()
         self.set_project(self.project, path)
         self.pages.bind("<<NotebookTabChanged>>", self.tab_changed)
@@ -266,7 +269,9 @@ class SetupApp:
         self.name.set(project["name"])
         self.aero_page.set_settings(project.get("aero", AERO_DEFAULTS))
         self.geometry_page.set_settings(project)
-        self.transfer_page.set_options(load_transfer_options(project.get("load_transfer", {})))
+        transfer = load_transfer_options(project.get("load_transfer", {}))
+        self.transfer_page.set_options(transfer)
+        self.tire_analysis_page.set_options(transfer)
         for key, var in self.vehicle_vars.items():
             var.set(project["vehicle"][key])
         frame = project_roll_frame(project)
@@ -315,6 +320,8 @@ class SetupApp:
             self.schedule_component_draw()
         elif selected == str(self.transfer_page):
             self.transfer_page.draw()
+        elif selected == str(self.tire_analysis_page):
+            self.tire_analysis_page.draw()
 
     def refresh_channels(self):
         model = self.analysis.model_key
@@ -658,7 +665,7 @@ class SetupApp:
         project.update(self.geometry_page.settings())
         if include_pages:
             project["page_cases"] = {key: other.case_input() for key, other in self.analysis_pages.items() if other is not page}
-            transfer = self.transfer_page.options()
+            transfer = self.tire_analysis_page.options()
             if "load_transfer" in self.project or transfer != transfer_options({}):
                 project["load_transfer"] = {"distribution": transfer}
         return project
@@ -687,9 +694,11 @@ class SetupApp:
     def run(self, page=None, *, scan=False, csv_path=None):
         if self.job is not None:
             return
-        if page is None and self.pages.select() == str(self.transfer_page):
-            self.transfer_page.draw()
-            return
+        if page is None:
+            selected = self.pages.select()
+            for static_page in (self.transfer_page, self.tire_analysis_page):
+                if selected == str(static_page):
+                    return static_page.draw()
         page = self.analysis if page is None else page
         try:
             project = self.collect(page)
@@ -792,7 +801,7 @@ class SetupApp:
         except ValueError:
             dirty = True
         if dirty:
-            return messagebox.askyesno(APP, "目前設定尚未儲存。要捨棄變更嗎？", parent=self.root)
+            return messagebox.askyesno(DISPLAY_NAME, "目前設定尚未儲存。要捨棄變更嗎？", parent=self.root)
         return True
 
     def new(self):
@@ -833,6 +842,6 @@ class SetupApp:
             self.root.destroy()
 
     def error(self, exc):
-        messagebox.showerror(APP, str(exc), parent=self.root)
+        messagebox.showerror(DISPLAY_NAME, str(exc), parent=self.root)
 
 
