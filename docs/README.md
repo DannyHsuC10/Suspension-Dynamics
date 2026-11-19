@@ -1,17 +1,7 @@
 # SuspensionDynamicsLab for GitHub Pages
 
-The public workbench is deployed from the `docs` directory on `main`. To preview it locally, run `python -m http.server 8765 --directory docs` from the repository root and open `http://localhost:8765`.
+The English browser workbench runs the local SuspensionDynamicsLab Python solver through Pyodide and NumPy in a worker. It provides full vehicle, left/right half car, front/rear half car, quarter car, vehicle settings, springs and dampers, geometry lookup, aerodynamics and load transfer. The lateral tire analysis is excluded.
 
-## Geometry and file formats
+Project JSON uses the native desktop format. Import also accepts the desktop legacy formats. CSV road replay, component tables, geometry tables, result exports, calculation snapshots, A/B comparisons, animation and LP02 CAD playback are available. The first calculation loads the Pyodide runtime from jsDelivr. Inputs are processed in the browser.
 
-The five geometry views use the same rigid double-wishbone model. Vehicle settings accept axle design parameters or 24 XYZ suspension hardpoints. The vehicle frame uses X forward, Y left and Z up. The wheel-end view uses an idealized wheel envelope and steering-axis rotation. Steering rack geometry, compliance and tire-force modelling are outside this geometry model.
-
-Project JSON contains geometry settings and, when used, a native Dynamics Lab project. The importer also accepts desktop tuning and Vehicle Initial Sizing Lab dynamics exports. Geometry CSVs contain pose results, sweeps, hardpoints or member endpoints. STEP uses millimetres and supports both analytic cylinders and wireframes. PNG uses the current view and camera.
-
-## Dynamics
-
-The desktop Python solver runs in a browser worker through Pyodide and NumPy. The first use of Dynamics loads the runtime from jsDelivr. Project files and recorded inputs are processed in the browser. The vertical wheel spring and damper remain available for ride and load calculations. The lateral tire model is excluded.
-
-Vehicle playback uses a schematic for each model and an optional LP02 CAD view for full-vehicle results. The LP02 viewer uses the desktop STL assets and requires WebGL.
-
-After editing the local desktop solver or `docs/runtime/dynamics_bridge.py`, run `python tools/sync_web_runtime.py` to update `docs/runtime/dynamics.zip` before publishing. The `--check` option verifies the archive against the local source.
+Publish the `docs` directory on `main` through GitHub Pages. Preview with `python -m http.server 8765 --directory docs`. Rebuild the packaged desktop solver with `python tools/sync_web_runtime.py` after changing its Python source. Check freshness with `--check`.

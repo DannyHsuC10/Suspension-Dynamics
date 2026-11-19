@@ -1,7 +1,6 @@
 import { EngineeringView } from './views.js';
 import { buildPlaybackScene } from './dynamics-playback.js';
-import { buildVehicle, geometryLookupRows } from './kinematics.js';
-import { csvText, downloadCsv, downloadPng } from './exports.js';
+import { downloadCsv, downloadPng } from './exports.js';
 import { LP02View } from './lp02.js';
 
 const models = { flex: 'Full vehicle · 8 DOF, flexible chassis', rigid: 'Full vehicle · 7 DOF, rigid chassis', half_lr: 'Half vehicle · left/right', half_fr: 'Half vehicle · front/rear', quarter: 'Quarter vehicle · 2 DOF' };
@@ -28,7 +27,7 @@ const geometryColumns = {
   roll_center: ['travel_mm', 'front_rc_mm', 'rear_rc_mm'],
   anti: ['travel_mm', 'front_anti_dive_pct', 'rear_anti_lift_pct', 'front_anti_lift_pct', 'rear_anti_squat_pct'],
 };
-const prefixes = { run: 'Simulation', vehicle: 'Vehicle and vertical response', components: 'Springs and dampers',
+const prefixes = { full: 'Full Vehicle', half_lr: 'Half Car · Left / Right', half_fr: 'Half Car · Front / Rear', quarter: 'Quarter Car', vehicle: 'Vehicle and Vertical Response', components: 'Springs and Dampers',
   geometry: 'Geometry lookup', aero: 'Aerodynamics', transfer: 'Load transfer' };
 const plotColours = ['#60e0c6', '#7bbcff', '#ffc477', '#e5a7e8', '#99df94', '#edaaaa', '#b6bbf8', '#e5e09b'];
 const transferDefaults = { ay: 1, radius: 20, height_f: 230, height_r: 230 };
@@ -196,10 +195,10 @@ class Runtime {
   }
 }
 
-export function mountDynamics(host, { geometry }) {
+export function mountDynamics(host) {
   const runtime = new Runtime();
   const state = {
-    project: null, base: null, panel: 'run', active: false, busy: false, needsGeometry: true,
+    project: null, base: null, panel: 'full', active: false, busy: false, needsGeometry: true,
     results: {}, baselines: {}, activeChannel: 'heave_f', current: null, scan: null,
     mode: 'chart', group: 'Wheel loads', frame: 0, animation: 0, playbackRate: 1, displacementGain: 1,
     transfer: { ...transferDefaults }, transferResult: null, generation: 0,
@@ -230,14 +229,6 @@ export function mountDynamics(host, { geometry }) {
     message.toggleAttribute('data-error', error);
   }
 
-  function updateShared() {
-    if (!state.project) return;
-    const source = geometry();
-    for (const key of Object.keys(sharedFields)) state.project.vehicle[key] = source.vehicle[key];
-    state.project.name = source.name;
-    state.needsGeometry = false;
-  }
-
   function persistCase() {
     if (!state.project) return;
     const project = state.project;
@@ -260,7 +251,10 @@ export function mountDynamics(host, { geometry }) {
         stopPlayback();
         state.panel = key;
         status('');
-        fill();
+        if (Object.hasOwn(families, key)) {
+          const saved = state.project.page_cases?.[key]?.model;
+          configureModel(saved || (key === 'full' ? 'flex' : key));
+        } else fill();
       });
       link.setAttribute('aria-pressed', String(state.panel === key));
       link.disabled = state.busy;
@@ -268,7 +262,7 @@ export function mountDynamics(host, { geometry }) {
     }));
     viewer?.destroy();
     viewer = undefined;
-    const render = { run: renderRun, vehicle: renderVehicle, components: renderComponents,
+    const render = { full: renderRun, half_lr: renderRun, half_fr: renderRun, quarter: renderRun, vehicle: renderVehicle, components: renderComponents,
       geometry: renderLookup, aero: renderAero, transfer: renderTransfer }[state.panel];
     content.replaceChildren(render());
   }
@@ -281,7 +275,6 @@ export function mountDynamics(host, { geometry }) {
     pendingActivation = runtime.request('defaults').then(project => {
       state.base = structuredClone(project);
       state.project ??= project;
-      if (state.needsGeometry) updateShared();
       persistCase();
       status('');
       if (state.active) fill();
@@ -305,7 +298,10 @@ export function mountDynamics(host, { geometry }) {
     state.baselines = {};
     state.current = null;
     state.scan = null;
+    state.panel = modelFamily(normalized.model);
+    state.current = null;
     persistCase();
+    if (state.active) fill();
   }
 
   function clearProject() {
@@ -338,6 +334,7 @@ export function mountDynamics(host, { geometry }) {
   function configureModel(model) {
     persistCase();
     const family = modelFamily(model);
+    state.panel = family;
     const project = state.project;
     const saved = project.page_cases[family]?.case;
     project.model = model;
@@ -388,7 +385,7 @@ export function mountDynamics(host, { geometry }) {
     if ((maneuvers || (iso && test.iso_lateral)) && roll) fields.push('ay');
     if (maneuvers || (iso && test.iso_lateral)) fields.push('ramp');
     const aside = runPanel();
-    aside.append(el('h2', 'Simulation setup'), select('Model', models, model, configureModel));
+    aside.append(el('h2', 'Simulation setup'), select('Model', Object.fromEntries(Object.entries(models).filter(([key]) => modelFamily(key) === modelFamily(model))), model, configureModel));
     if (sourceOptions[model]) {
       project.model_sources ??= {};
       project.model_sources[model] ??= Object.keys(sourceOptions[model])[0];
@@ -672,14 +669,11 @@ export function mountDynamics(host, { geometry }) {
     const project = state.project;
     const section = el('section', null, 'panel data-panel');
     section.append(el('h2', 'Vehicle and vertical response'));
-    const shared = el('div', null, 'metrics');
-    for (const [key, label] of Object.entries(sharedFields)) {
-      const card = el('div');
-      card.append(el('dt', label), el('dd', fmt(project.vehicle[key])));
-      shared.append(card);
-    }
-    section.append(shared, el('p', 'Edit these shared dimensions using Vehicle settings in the header.', 'muted'),
-      numberGrid(project.vehicle, Object.fromEntries(Object.entries(vehicleFields).filter(([key]) => !(key in sharedFields)))));
+    section.append(numberGrid(project.vehicle, vehicleFields));
+    const name = el('input');
+    name.type = 'text'; name.value = project.name;
+    name.addEventListener('change', () => { if (name.value.trim()) project.name = name.value.trim(); });
+    section.append(field('Project name', name));
     const corners = el('div', null, 'settings-grid border-section');
     for (const corner of wheelPositions) {
       const wheel = el('section', null, 'stack');
@@ -865,7 +859,7 @@ export function mountDynamics(host, { geometry }) {
       const mode = project.geometry_modes[kind] || (project.geometry_tables[kind] ? 'lookup' : 'fixed');
       block.append(el('h3', title), select('Data source', { fixed: 'Fixed values', lookup: 'Travel lookup table' }, mode, value => {
         if (value === 'lookup' && !project.geometry_tables[kind]?.length) {
-          status('Import or generate a lookup table first.', true);
+          status('Import a lookup table first.', true);
           fill();
           return;
         }
@@ -882,13 +876,6 @@ export function mountDynamics(host, { geometry }) {
       tools.append(localFile('Import lookup CSV', async file => {
         try { saveRows((await runtime.request('parseCsv', { kind, text: await file.text() })).rows); }
         catch (error) { status(error.message, true); }
-      }), button('Use vehicle geometry', async () => {
-        try {
-          const rows = geometryLookupRows(buildVehicle(geometry()), kind);
-          if (!rows.length) throw new Error('No valid lookup samples in the configured travel range.');
-          const validated = await runtime.request('parseCsv', { kind, text: csvText(rows, columnNames) });
-          saveRows(validated.rows);
-        } catch (error) { status(error.message, true); }
       }), button('Download CSV template', () => {
         const samples = [-25, 0, 25].map(travel => Object.fromEntries(columnNames.map((key, i) => [key, i === 0 ? travel : (kind === 'anti' ? 15 : 25)])));
         downloadCsv(samples, `${kind}-template.csv`, columnNames);
@@ -897,6 +884,18 @@ export function mountDynamics(host, { geometry }) {
       if (rows) tools.append(button('Download current CSV', () => downloadCsv(rows.map(row => Object.fromEntries(columnNames.map((key, i) => [key, row[i]]))), nameOf(project, kind, 'csv'), columnNames)));
       block.append(tools);
       if (rows) {
+        tools.append(button('Plot lookup curves', () => {
+          const plot = el('div', null, 'plot');
+          const canvas = el('canvas'); canvas.tabIndex = 0;
+          plot.append(canvas);
+          const old = section.querySelector('.lookup-plot');
+          old?.remove();
+          plot.classList.add('lookup-plot');
+          section.append(plot);
+          viewer?.destroy(); viewer = new EngineeringView(canvas);
+          viewer.setChart({ xLabel: 'Travel (mm)', yLabel: kind === 'anti' ? 'Anti (%)' : 'Roll centre (mm)',
+            series: columnNames.slice(1).map((label, index) => ({ label, points: rows.map(row => [row[0], row[index + 1]]) })) });
+        }));
         const details = el('details');
         details.append(el('summary', `${rows.length} samples`), table(columnNames, rows.map(row => row.map(value => fmt(value)))));
         block.append(details);
@@ -982,19 +981,18 @@ export function mountDynamics(host, { geometry }) {
 
   return {
     activate() {
-      if (state.project && state.needsGeometry) updateShared();
       return activate();
     },
     deactivate() { state.active = false; stopPlayback(); },
     exportProject,
     importProject,
     clearProject,
-    geometryChanged() {
-      state.generation++;
-      state.needsGeometry = true;
-      state.transferResult = null;
-      updateShared();
-      if (state.active) fill();
+    openVehicle() { state.panel = 'vehicle'; stopPlayback(); fill(); },
+    async newProject() {
+      runtime.stop(); stopPlayback(); state.generation++; state.busy = false;
+      clearProject(); state.panel = 'full';
+      await activate();
     },
+    run() { if (!state.busy && Object.hasOwn(families, state.panel)) return run('simulate'); },
   };
 }
