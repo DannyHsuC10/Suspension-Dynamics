@@ -614,7 +614,12 @@ export function mountDynamics(host) {
     extremaReadout = el('div');
     extremaDetails.append(el('summary', 'Curve extrema'), extremaReadout);
     response.append(thresholdReadout, extremaDetails);
-    visuals.append(modelPanel(result), response);
+    visuals.append(modelPanel(result));
+    if ((result?.corners ?? sourceWheels()).length === 4) {
+      visuals.classList.add('full-vehicle-visuals');
+      visuals.append(forceMonitor(result));
+    }
+    visuals.append(response);
     const transport = el('div', null, 'playback-bar');
     frameLabel = el('output', '0.000 s', 'playback-clock');
     frameSlider = el('input');
@@ -635,7 +640,6 @@ export function mountDynamics(host) {
     transport.append(playButton, previous, next, frameSlider, frameLabel, speed);
     liveMetrics = el('div', null, 'live-wheel-loads');
     panel.append(header, controls, note, visuals, transport, liveMetrics);
-    if (result?.corners.length === 4) panel.append(forceMonitor(result));
     if (state.busy) {
       const running = el('div', null, 'calculation-progress');
       const progress = el('progress', null, 'dynamics-progress');
@@ -701,9 +705,11 @@ export function mountDynamics(host) {
       const value = row.values?.[index];
       row.output.textContent = Number.isFinite(value) ? fmt(value, 2) : '—';
       const position = Number.isFinite(value) ? Math.max(0, Math.min(1, (value - row.low) / (row.high - row.low))) : row.zero;
-      row.bar.style.left = `${Math.min(position, row.zero) * 100}%`;
-      row.bar.style.width = `${Math.abs(position - row.zero) * 100}%`;
-      row.bar.toggleAttribute('data-negative', value < 0);
+      if (row.bar) {
+        row.bar.style.top = `${(1 - Math.max(position, row.zero)) * 100}%`;
+        row.bar.style.height = `${Math.abs(position - row.zero) * 100}%`;
+        row.bar.toggleAttribute('data-negative', value < 0);
+      }
     }
     liveMetrics.replaceChildren(...result.corners.map(corner => {
       const key = Object.keys(result.series).find(label => label === `${corner} [N]` || label.startsWith(`${corner} wheel load`));
@@ -712,14 +718,18 @@ export function mountDynamics(host) {
   }
 
   function forceMonitor(result) {
-    const panel = el('details', null, 'force-monitor');
-    panel.open = state.monitorOpen ?? true;
-    panel.addEventListener('toggle', () => { state.monitorOpen = panel.open; });
-    panel.append(el('summary', 'Full vehicle force monitor'));
+    const panel = el('section', null, 'force-monitor');
+    panel.setAttribute('aria-label', 'Full vehicle force monitor');
+    panel.append(el('h3', 'Full vehicle force monitor'));
+    if (!result) {
+      panel.append(el('p', 'Run a simulation to view wheel loads, suspension forces and modal forces.', 'muted'));
+      return panel;
+    }
     const groups = el('div', null, 'monitor-groups');
     for (const group of result.monitor || []) {
       const section = el('section', null, 'monitor-group');
-      if (group.title === 'Body motion') section.classList.add('motion-readouts');
+      const bodyMotion = group.title === 'Body motion';
+      if (bodyMotion) section.classList.add('motion-readouts');
       section.append(el('h3', group.title));
       let extent = 1;
       let signed = false;
@@ -730,19 +740,42 @@ export function mountDynamics(host) {
       const low = signed ? -extent * 1.1 : 0;
       const high = extent * 1.1;
       const zero = -low / (high - low);
-      for (const item of group.rows) {
-        const row = el('div', null, 'monitor-row');
-        const track = el('span', null, 'monitor-track');
-        const bar = el('i');
-        const axis = el('i', null, 'monitor-zero');
-        axis.style.left = `${zero * 100}%`;
-        track.append(bar, axis);
+      const chart = el('div', null, bodyMotion ? 'monitor-readout-list' : 'force-bar-chart');
+      const columns = el('div', null, bodyMotion ? 'monitor-readouts' : 'force-columns');
+      if (!bodyMotion) {
+        const scale = el('div', null, 'force-scale');
+        scale.setAttribute('aria-hidden', 'true');
+        scale.append(el('span', fmt(high, 0), 'force-scale-high'), el('span', fmt(low, 0), 'force-scale-low'));
+        if (signed) {
+          const zeroLabel = el('span', '0', 'force-scale-zero');
+          zeroLabel.style.top = `${(1 - zero) * 100}%`;
+          scale.append(zeroLabel);
+        }
+        chart.append(scale);
+      }
+      for (const [index, item] of group.rows.entries()) {
+        const row = el('div', null, bodyMotion ? 'monitor-readout' : 'force-column');
         const output = el('output', '—');
         output.setAttribute('aria-label', `${group.title} · ${item.label}`);
-        row.append(el('span', item.label), track, output);
-        section.append(row);
+        let bar;
+        if (bodyMotion) row.append(el('span', item.label), output);
+        else {
+          const track = el('div', null, 'force-bar-track');
+          track.setAttribute('role', 'img');
+          track.setAttribute('aria-label', `${item.label} force bar`);
+          bar = el('i', null, 'force-bar');
+          bar.style.height = '0%';
+          bar.style.backgroundColor = plotColours[index % plotColours.length];
+          const axis = el('i', null, 'force-zero-line');
+          axis.style.top = `${(1 - zero) * 100}%`;
+          track.append(axis, bar);
+          row.append(output, track, el('span', item.label, 'force-bar-label'));
+        }
+        columns.append(row);
         monitorRows.push({ values: result.series[item.signal], output, bar, low, high, zero });
       }
+      chart.append(columns);
+      section.append(chart);
       groups.append(section);
     }
     panel.append(groups);
