@@ -602,10 +602,20 @@ export function mountDynamics(host) {
       state.group = value; drawResult(false);
     });
     signals.querySelector('select').disabled = !result;
-    const baseline = button('Set as baseline A', () => {
-      state.baselines[result.project.model] = result;
-      status('Current result saved as baseline A.'); fill();
-    });
+    const baselineForCurrent = result ? baselineFor(result) : null;
+    const baseline = button(
+      baselineForCurrent ? 'Clear baseline A' : 'Set as baseline A',
+      () => {
+        if (baselineFor(result)) {
+          delete state.baselines[result.project.model];
+          status('Baseline A cleared.');
+        } else {
+          state.baselines[result.project.model] = result;
+          status('Current result saved as baseline A.');
+        }
+        fill();
+      },
+    );
     baseline.disabled = !result;
     controls.append(signals, baseline);
     const note = el('p', result ? `${models[result.project.model]} · ${result.time.length.toLocaleString('en-US')} samples` : 'Run a simulation to view motion, compare curves and export results.', 'result-note');
