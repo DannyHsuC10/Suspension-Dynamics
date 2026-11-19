@@ -18,7 +18,6 @@ document.getElementById('new-project').addEventListener('click', async () => {
   try { await app.newProject(); report('New project loaded.'); }
   catch (error) { report(error.message, true); }
 });
-document.getElementById('open-settings').addEventListener('click', () => app.openVehicle());
 document.getElementById('import-project').addEventListener('click', () => document.getElementById('project-file').click());
 document.getElementById('project-file').addEventListener('change', async event => {
   const file = event.target.files[0];

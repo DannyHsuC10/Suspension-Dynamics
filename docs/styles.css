@@ -170,8 +170,33 @@ tbody tr:hover { background: #f5fafb; }
 .lookup-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; }
 .lookup-column { display: grid; grid-template-rows: auto auto minmax(0, 1fr); align-content: start; gap: .7rem; min-width: 0; }
 .lookup-controls { padding: .8rem; border: 1px solid var(--line); border-radius: 8px; background: #f3f7fb; }
+.lookup-page { padding: .65rem; }
+.lookup-page > h2 { font-size: 1rem; }
+.lookup-page > .result-note { margin: .35rem 0 .5rem; font-size: .82rem; line-height: 1.35; }
+.lookup-controls { padding: .55rem; gap: .35rem; }
+.lookup-controls > .field { grid-template-columns: minmax(0, 1fr) minmax(9rem, 12rem); align-items: center; }
+.lookup-controls .field { font-size: .875rem; gap: .18rem; }
+.lookup-controls .form-grid { gap: .35rem .65rem; }
+.lookup-controls input, .lookup-controls select, .lookup-controls button { padding-block: .24rem; font-size: .875rem; }
+.lookup-controls .notice { font-size: .8rem; line-height: 1.3; }
+.lookup-column { gap: .5rem; }
+.lookup-column .visual-toolbar { padding: .3rem .5rem; min-height: 2.25rem; }
+.lookup-column .visual-toolbar h3 { font-size: .875rem; }
+/* Transfer 15% of the chart width to the original 18rem settings column. */
+.dynamics-layout .components-workbench { grid-template-columns: calc(15% + 15.165rem) minmax(0, 1fr); }
+.full-workbench > .sidebar { padding: .75rem; gap: .55rem; }
+.full-workbench > .analysis-panel { padding: .65rem; }
+.full-workbench .analysis-heading { margin-bottom: .45rem; gap: .4rem; }
+.full-workbench .analysis-heading h2 { font-size: 1rem; }
+.full-workbench .result-controls { gap: .4rem; }
+.full-workbench .result-controls > .field { display: flex; align-items: center; gap: .4rem; }
+.full-workbench .result-controls > .field > span { white-space: nowrap; }
+.full-workbench .result-note { margin: .35rem 0 .5rem; font-size: .82rem; }
+.full-workbench .result-files button, .full-workbench .result-files select, .full-workbench .result-controls button, .full-workbench .result-controls select { padding-block: .3rem; }
+.full-workbench .visual-toolbar { padding: .3rem .5rem; gap: .25rem; min-height: 3.5rem; }
+.aero-reference-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .lookup-column .plot canvas { height: clamp(18rem, 38vh, 29rem); }
-.lookup-column .visual-toolbar { min-height: 3.2rem; }
+.lookup-column .visual-toolbar { min-height: 2.25rem; }
 .lookup-column .visual-toolbar h3 { flex: 1; }
 .lookup-samples { padding-top: .65rem; border-top: 1px solid var(--line); }
 @supports (grid-template-rows: subgrid) {
@@ -265,6 +290,7 @@ tbody tr:hover { background: #f5fafb; }
 @media (max-width: 760px) {
   .dynamics-layout .work-grid { grid-template-columns: minmax(0, 1fr); }
   .header-row { flex-wrap: wrap; }
+  .dynamics-layout .components-workbench { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 650px) {
   .simulation-visuals.full-vehicle-visuals { grid-template-columns: minmax(0, 1fr); }

@@ -27,7 +27,7 @@ const geometryColumns = {
   roll_center: ['travel_mm', 'front_rc_mm', 'rear_rc_mm'],
   anti: ['travel_mm', 'front_anti_dive_pct', 'rear_anti_lift_pct', 'front_anti_lift_pct', 'rear_anti_squat_pct'],
 };
-const prefixes = { full: 'Full Vehicle', half_lr: 'Half Car · Left / Right', half_fr: 'Half Car · Front / Rear', quarter: 'Quarter Car', vehicle: 'Vehicle and Vertical Response', components: 'Springs and Dampers',
+const prefixes = { full: 'Full Vehicle', half_lr: 'Half Car · Left / Right', half_fr: 'Half Car · Front / Rear', quarter: 'Quarter Car', vehicle: 'Vehicle settings', components: 'Springs and Dampers',
   geometry: 'Geometry lookup', aero: 'Aerodynamics', transfer: 'Load transfer' };
 const plotColours = ['#60e0c6', '#7bbcff', '#ffc477', '#e5a7e8', '#99df94', '#edaaaa', '#b6bbf8', '#e5e09b'];
 const transferDefaults = { ay: 1, radius: 20, height_f: 230, height_r: 230 };
@@ -455,6 +455,7 @@ export function mountDynamics(host) {
 
   function renderRun() {
     const wrapper = el('div', null, 'work-grid run-workbench');
+    if (sourceWheels().length === 4) wrapper.classList.add('full-workbench');
     wrapper.append(renderCase(), resultPanel(state.current));
     return wrapper;
   }
@@ -828,7 +829,7 @@ export function mountDynamics(host) {
   function renderVehicle() {
     const project = state.project;
     const section = el('section', null, 'panel data-panel');
-    section.append(el('h2', 'Vehicle and vertical response'));
+    section.append(el('h2', 'Vehicle settings'));
     section.append(numberGrid(project.vehicle, vehicleFields));
     const name = el('input');
     name.type = 'text'; name.value = project.name;
@@ -941,6 +942,7 @@ export function mountDynamics(host) {
     if (tableMode) section.append(componentFile('Import motion ratio CSV', 'mr', setup), el('p', `${setup.mr.length} motion-ratio samples`, 'muted'));
     else section.append(number('Motion ratio', setup.mr[0][1], value => { setup.mr = [[0, value]]; }, { min: .000001 }));
     const wrapper = el('div', null, 'work-grid run-workbench');
+    wrapper.classList.add('components-workbench');
     section.className = 'panel sidebar';
     const previews = el('section', null, 'panel analysis-panel');
     const plots = el('div', null, 'component-charts');
@@ -1054,7 +1056,7 @@ export function mountDynamics(host) {
         chart.set({ xLabel: 'Relative static wheel travel (mm)', yLabel: kind === 'anti' ? 'Anti (%)' : 'Height (mm)',
           series: names[kind].map((label, index) => ({ label, points: rows.map(row => [row[0], row[index + 1]]) })) });
       };
-      controls.append(el('h3', title), select(`${title} data source`, { fixed: 'Fixed values', lookup: 'CSV travel lookup' }, mode, value => {
+      controls.append(select(`${title} data source`, { fixed: 'Fixed values', lookup: 'CSV travel lookup' }, mode, value => {
         project.geometry_modes[kind] = value;
         fill();
       }));
@@ -1122,9 +1124,11 @@ export function mountDynamics(host) {
       output.textContent = `${fmt(factor * speed ** 2)} N at the current simulation speed of ${fmt(speed)} km/h.`;
     };
     panel.append(plot);
-    section.append(el('h2', 'Aerodynamics'), check('Enable downforce', aero.enabled, value => { aero.enabled = value; draw(); }),
+    const referenceFields = el('div', null, 'form-grid aero-reference-fields');
+    referenceFields.append(
       number('Reference speed (km/h)', aero.reference_speed_kmh, value => { aero.reference_speed_kmh = value; draw(); }, { min: .1, max: 540 }),
-      number('Reference downforce (N)', aero.reference_force_n, value => { aero.reference_force_n = value; draw(); }, { min: 0, max: 1000000 }), output, panel);
+      number('Reference downforce (N)', aero.reference_force_n, value => { aero.reference_force_n = value; draw(); }, { min: 0, max: 1000000 }));
+    section.append(el('h2', 'Aerodynamics'), check('Enable downforce', aero.enabled, value => { aero.enabled = value; draw(); }), referenceFields, output, panel);
     queueMicrotask(() => { if (canvas.isConnected) { viewer = new EngineeringView(canvas); draw(); } });
     return section;
   }
@@ -1204,7 +1208,6 @@ export function mountDynamics(host) {
     exportProject,
     importProject,
     clearProject,
-    openVehicle() { state.panel = 'vehicle'; stopPlayback(); fill(); },
     async newProject() {
       runtime.stop(); stopPlayback(); state.generation++; state.busy = false;
       clearProject(); state.panel = 'full';
