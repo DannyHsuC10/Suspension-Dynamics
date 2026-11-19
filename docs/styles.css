@@ -184,16 +184,6 @@ tbody tr:hover { background: #f5fafb; }
 .lookup-column .visual-toolbar h3 { font-size: .875rem; }
 /* Transfer 15% of the chart width to the original 18rem settings column. */
 .dynamics-layout .components-workbench { grid-template-columns: calc(15% + 15.165rem) minmax(0, 1fr); }
-.full-workbench > .sidebar { padding: .75rem; gap: .55rem; }
-.full-workbench > .analysis-panel { padding: .65rem; }
-.full-workbench .analysis-heading { margin-bottom: .45rem; gap: .4rem; }
-.full-workbench .analysis-heading h2 { font-size: 1rem; }
-.full-workbench .result-controls { gap: .4rem; }
-.full-workbench .result-controls > .field { display: flex; align-items: center; gap: .4rem; }
-.full-workbench .result-controls > .field > span { white-space: nowrap; }
-.full-workbench .result-note { margin: .35rem 0 .5rem; font-size: .82rem; }
-.full-workbench .result-files button, .full-workbench .result-files select, .full-workbench .result-controls button, .full-workbench .result-controls select { padding-block: .3rem; }
-.full-workbench .visual-toolbar { padding: .3rem .5rem; gap: .25rem; min-height: 3.5rem; }
 .aero-reference-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .lookup-column .plot canvas { height: clamp(18rem, 38vh, 29rem); }
 .lookup-column .visual-toolbar { min-height: 2.25rem; }
@@ -285,4 +275,16 @@ tbody tr:hover { background: #f5fafb; }
   .dynamics-layout .work-grid { grid-template-columns: minmax(0, 1fr); }
   .header-row { flex-wrap: wrap; }
   .dynamics-layout .components-workbench { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Full-car headers use the same spacing as the half-car headers. */
+.simulation-visuals.full-vehicle-visuals.force-overview { grid-template-columns: minmax(0, 1fr); }
+.force-overview .full-left-visual > .force-monitor { height: auto; max-height: none; overflow: visible; }
+.force-overview .full-left-visual .monitor-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.aero-page { gap: .7rem; padding-top: .9rem; }
+.aero-page .aero-reference-fields { gap: .55rem 1rem; }
+.aero-page .aero-reference-fields .field { gap: .25rem; }
+.aero-page .aero-reference-fields input { padding-block: .4rem; }
+@media (max-width: 650px) {
+  .force-overview .full-left-visual .monitor-groups { grid-template-columns: minmax(0, 1fr); }
 }

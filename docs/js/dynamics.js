@@ -496,7 +496,7 @@ export function mountDynamics(host) {
     return panel;
   }
 
-  function fullVehicleLeftPanel(result) {
+  function fullVehicleLeftPanel(result, visuals, response) {
     const panel = el('section', null, 'visual-panel full-left-visual');
     panel.setAttribute('aria-label', 'Vehicle animation and force monitor');
     const animation = modelPanel(result);
@@ -508,6 +508,8 @@ export function mountDynamics(host) {
     const update = value => {
       state.fullLeftView = value;
       const showForces = value === 'forces';
+      visuals.classList.toggle('force-overview', showForces);
+      response.hidden = showForces;
       plot.hidden = showForces;
       monitor.hidden = !showForces;
       gain.hidden = fit.hidden = showForces;
@@ -625,7 +627,7 @@ export function mountDynamics(host) {
     response.append(thresholdReadout, extremaDetails);
     if ((result?.corners ?? sourceWheels()).length === 4) {
       visuals.classList.add('full-vehicle-visuals');
-      visuals.append(fullVehicleLeftPanel(result));
+      visuals.append(fullVehicleLeftPanel(result, visuals, response));
     } else visuals.append(modelPanel(result));
     visuals.append(response);
     const transport = el('div', null, 'playback-bar');
@@ -1128,7 +1130,7 @@ export function mountDynamics(host) {
     const project = state.project;
     project.aero ??= structuredClone(state.base.aero);
     const aero = project.aero;
-    const section = el('section', null, 'panel data-panel');
+    const section = el('section', null, 'panel data-panel aero-page');
     const panel = el('section', null, 'panel figure-panel');
     const plot = el('div', null, 'plot');
     const canvas = el('canvas');
