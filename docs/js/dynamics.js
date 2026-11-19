@@ -212,6 +212,7 @@ export function mountDynamics(host) {
   shell.append(nav, message, content);
   host.append(shell);
   let viewer;
+  let modelViewer;
   let pendingActivation;
   let renderedResult;
   let frameLabel;
@@ -262,6 +263,8 @@ export function mountDynamics(host) {
     }));
     viewer?.destroy();
     viewer = undefined;
+    modelViewer?.destroy();
+    modelViewer = undefined;
     const render = { full: renderRun, half_lr: renderRun, half_fr: renderRun, quarter: renderRun, vehicle: renderVehicle, components: renderComponents,
       geometry: renderLookup, aero: renderAero, transfer: renderTransfer }[state.panel];
     content.replaceChildren(render());
@@ -439,13 +442,51 @@ export function mountDynamics(host) {
       right.append(running);
     }
     if (state.scan) right.append(scanPanel());
-    if (state.current) right.append(resultPanel(state.current), resultMetrics(state.current));
-    else if (!state.busy) {
-      const empty = el('section', null, 'panel data-panel');
-      empty.append(el('h2', 'Results'), el('p', 'Choose a model and input condition, then run a simulation to inspect traces and playback.', 'muted'));
-      right.append(empty);
-    }
+    const visuals = el('div', null, 'simulation-visuals');
+    visuals.append(modelPanel(state.current));
+    visuals.append(state.current ? resultPanel(state.current) : emptyChartPanel());
+    right.append(visuals);
+    if (state.current) right.append(resultMetrics(state.current));
     return wrapper;
+  }
+
+  function modelPanel(result) {
+    const panel = el('section', null, 'panel figure-panel');
+    const header = el('div', null, 'figure-header');
+    header.append(el('h2', 'Model schematic'), button('Fit model', () => modelViewer?.reset()));
+    const plot = el('div', null, 'plot');
+    const canvas = el('canvas');
+    canvas.tabIndex = 0;
+    plot.append(canvas);
+    panel.append(header, plot);
+    if (!result) panel.append(el('p', 'Initial model layout · Run a simulation to view motion.', 'model-caption'));
+    queueMicrotask(() => {
+      if (!canvas.isConnected) return;
+      modelViewer = new EngineeringView(canvas);
+      const preview = result || {
+        project: structuredClone(state.project), corners: sourceWheels(), time: [0], series: {},
+        motion: [sourceWheels().map(() => [0, 0, 0])],
+      };
+      modelViewer.setScene(buildPlaybackScene(preview, result ? state.frame : 0), { showLabels: true });
+    });
+    return panel;
+  }
+
+  function emptyChartPanel() {
+    const panel = el('section', null, 'panel figure-panel');
+    const header = el('div', null, 'figure-header');
+    header.append(el('h2', 'Simulation output'));
+    const plot = el('div', null, 'plot');
+    const canvas = el('canvas');
+    canvas.tabIndex = 0;
+    plot.append(canvas);
+    panel.append(header, plot);
+    queueMicrotask(() => {
+      if (!canvas.isConnected) return;
+      viewer = new EngineeringView(canvas);
+      viewer.setChart({ xLabel: 'Time (s)', yLabel: 'Result', series: [] });
+    });
+    return panel;
   }
 
   async function run(command) {
@@ -545,7 +586,7 @@ export function mountDynamics(host) {
         try { await viewer.ready; viewer.draw(); await downloadPng(canvas, nameOf(result.project, 'simulation', 'png')); }
         catch (error) { status(error.message, true); }
       }));
-    panel.append(header, toolbar, plot, transport, actions);
+    panel.append(header, toolbar, transport, plot, actions);
     queueMicrotask(async () => {
       if (!canvas.isConnected) return;
       try {
@@ -577,6 +618,7 @@ export function mountDynamics(host) {
     const seconds = result.time[index];
     frameLabel.value = `${fmt(seconds, 4)} s / ${fmt(result.time.at(-1), 4)} s`;
     frameSlider.value = index;
+    modelViewer?.setScene(buildPlaybackScene(result, index, { gain: state.displacementGain }), { preserveView: preserve, showLabels: true });
     if (state.mode === 'lp02') viewer.setFrame(result, index);
     else if (state.mode === 'playback') viewer.setScene(buildPlaybackScene(result, index, { gain: state.displacementGain }), { preserveView: preserve, showConstruction: true, showLabels: true });
     else {
@@ -644,9 +686,11 @@ export function mountDynamics(host) {
   }
 
   function resultMetrics(result) {
-    const section = el('section', null, 'panel data-panel');
+    const section = el('details', null, 'panel data-panel results-details');
+    section.open = state.resultsOpen ?? true;
+    section.addEventListener('toggle', () => { state.resultsOpen = section.open; });
     const baseline = baselineFor(result);
-    section.append(el('h2', 'Tuning metrics'));
+    section.append(el('summary', 'Current results'));
     const summary = [`Heave acceleration RMS ${fmt(result.metrics.body_rms)} m/s²`, `${result.steps.toLocaleString('en-US')} integration steps`];
     if (baseline && baseline !== result) summary.push(`RMS B − A ${fmt(result.metrics.body_rms - baseline.metrics.body_rms)} m/s²`);
     section.append(el('p', summary.join(' · '), 'muted'));

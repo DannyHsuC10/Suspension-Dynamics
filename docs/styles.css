@@ -135,6 +135,19 @@ tbody tr:hover { background: #f5fafb; }
 .dynamics-layout input[type=range], .dynamics-progress { width: 100%; }
 .dynamics-subnav { display: flex; flex-wrap: wrap; gap: .4rem; }
 .dynamics-subnav button[aria-pressed=true] { background: var(--accent-light); border-color: #79a4af; color: #065c54; }
+.dynamics-subnav { gap: .3rem; }
+.dynamics-subnav button { padding: .36rem .62rem; font-size: .84rem; }
+.simulation-visuals { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.35fr); gap: .8rem; align-items: start; }
+.simulation-visuals .plot canvas { height: clamp(14rem, 35vh, 24rem); }
+.simulation-visuals .figure-header { padding: .65rem .8rem; }
+.model-caption { padding: .65rem .8rem; font-size: .85rem; color: var(--muted); }
+.results-details { display: block; }
+.results-details[open] > :not(summary) { margin-top: .8rem; }
+.results-details > summary { font-size: 1.1rem; }
+@media (max-width: 1100px) {
+  .simulation-visuals { grid-template-columns: minmax(0, 1fr); }
+  .simulation-visuals .plot canvas { height: clamp(13rem, 30vh, 21rem); }
+}
 .dynamics-controls { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; }
 .wide-input { min-width: min(100%, 15rem); }
 .border-section { display: grid; gap: .75rem; border-top: 1px solid var(--line); padding-top: .75rem; }
