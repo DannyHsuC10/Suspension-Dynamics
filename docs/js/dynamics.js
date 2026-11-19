@@ -200,7 +200,7 @@ export function mountDynamics(host) {
   const state = {
     project: null, base: null, panel: 'full', active: false, busy: false, needsGeometry: true,
     results: {}, baselines: {}, activeChannel: 'heave_f', current: null, scan: null,
-    mode: 'playback', group: 'Wheel loads', frame: 0, animation: 0, playbackRate: 1, displacementGain: 1,
+    group: 'Wheel loads', frame: 0, animation: 0, playbackRate: 1, displacementGain: 1,
     transfer: { ...transferDefaults }, transferResult: null, generation: 0,
   };
   const shell = el('div', null, 'dynamics-layout');
@@ -463,20 +463,14 @@ export function mountDynamics(host) {
     const panel = el('section', null, 'visual-panel model-visual');
     panel.setAttribute('aria-label', 'Model animation');
     const header = el('div', null, 'visual-toolbar');
-    const modes = { playback: 'Schematic' };
-    if (!Object.hasOwn(modes, state.mode)) state.mode = 'playback';
     header.append(el('h3', 'Model animation'));
-    const display = select('Model view', modes, state.mode, value => {
-      stopPlayback(); state.mode = value; fill();
-    });
     const gain = select('Motion scale', { 1: '1×', 2: '2×', 4: '4×', 8: '8×' }, String(state.displacementGain), value => {
       state.displacementGain = Number(value);
       if (result) drawResult(false);
     });
-    display.classList.add('compact-control');
     gain.classList.add('compact-control');
     gain.querySelector('select').disabled = !result;
-    header.append(display, gain, button('Fit', () => modelViewer?.reset()));
+    header.append(gain, button('Fit', () => modelViewer?.reset()));
     const plot = el('div', null, 'plot');
     const canvas = el('canvas');
     canvas.tabIndex = 0;
@@ -495,7 +489,7 @@ export function mountDynamics(host) {
       } catch (error) {
         if (!canvas.isConnected) return;
         status(`${error.message} Showing schematic playback.`, true);
-        stopPlayback(); state.mode = 'playback'; fill();
+        stopPlayback(); fill();
       }
     });
     return panel;
