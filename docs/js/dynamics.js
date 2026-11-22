@@ -4,7 +4,8 @@ import { buildPlaybackScene } from './dynamics-playback.js';
 import { downloadCsv, downloadPng } from './exports.js';
 
 const models = { flex: 'Full vehicle · 8 DOF, flexible chassis', rigid: 'Full vehicle · 7 DOF, rigid chassis', half_lr: 'Half vehicle · left/right', half_fr: 'Half vehicle · front/rear', quarter: 'Quarter vehicle · 2 DOF' };
-const scenarios = { bump: 'Road bump or dip', iso_a: 'ISO 8608 Class A', iso_b: 'ISO 8608 Class B', iso_c: 'ISO 8608 Class C', cornering: 'Lateral acceleration', maneuver: 'Braking, acceleration or cornering', combined: 'Bump with acceleration', csv: 'Recorded CSV replay' };
+const quarterRoadCases = { step: 'Road step', random: 'Random road' };
+const scenarios = { bump: 'Road bump or dip', ...quarterRoadCases, iso_a: 'ISO 8608 Class A', iso_b: 'ISO 8608 Class B', iso_c: 'ISO 8608 Class C', cornering: 'Lateral acceleration', maneuver: 'Braking, acceleration or cornering', combined: 'Bump with acceleration', csv: 'Recorded CSV replay' };
 const channels = { heave_f: 'Front heave', heave_r: 'Rear heave', roll_f: 'Front roll', roll_r: 'Rear roll', roll_c: 'Combined roll', warp: 'Diagonal warp', FL: 'FL direct', FR: 'FR direct', RL: 'RL direct', RR: 'RR direct' };
 const wheelPositions = ['FL', 'FR', 'RL', 'RR'];
 const families = { full: 'Full vehicle', half_lr: 'Half left/right', half_fr: 'Half front/rear', quarter: 'Quarter vehicle' };
@@ -22,6 +23,7 @@ const geometryFields = { h_rc_f: 'Front roll centre (m)', h_rc_r: 'Rear roll cen
   lift_front: 'Front drive anti-lift (fraction)', squat_rear: 'Rear anti-squat (fraction)' };
 const caseFields = { duration: 'Duration (s)', dt: 'Output interval (s)', start: 'Input start (s)', height: 'Bump height (mm)',
   period: 'Bump crossing time (s)', speed: 'Vehicle speed (m/s)', seed: 'Road random seed',
+  random_interval: 'Random road knot interval (s)',
   ax: 'Longitudinal acceleration (m/s²)', ay: 'Lateral acceleration (m/s²)', ramp: 'Acceleration rise time (s)' };
 const geometryColumns = {
   roll_center: ['travel_mm', 'front_rc_mm', 'rear_rc_mm'],
@@ -399,14 +401,24 @@ export function mountDynamics(host) {
     const sourceOptions = { quarter: Object.fromEntries(wheelPositions.map(key => [key, key])),
       half_lr: { front: 'Front axle', rear: 'Rear axle' }, half_fr: { left: 'Left side', right: 'Right side' } };
     const scenarioOptions = Object.fromEntries(Object.entries(scenarios).filter(([key]) =>
-      (key !== 'cornering' || roll) && (!['maneuver', 'combined'].includes(key) || !quarter)));
+      (key !== 'cornering' || roll) && (!['maneuver', 'combined'].includes(key) || !quarter)
+      && (!Object.hasOwn(quarterRoadCases, key) || quarter)));
     const bump = ['bump', 'combined'].includes(test.scenario);
     const iso = test.scenario.startsWith('iso_');
+    const step = test.scenario === 'step';
+    const random = test.scenario === 'random';
+    const targetedRoad = bump || iso || step || random;
     const maneuvers = ['cornering', 'maneuver', 'combined'].includes(test.scenario);
     const fields = ['dt', 'speed'];
     if (test.scenario !== 'csv') fields.unshift('duration', 'start');
-    if (bump) fields.push('height', 'period');
-    if (iso) fields.push('seed');
+    if (bump || step || random) fields.push('height');
+    if (bump) fields.push('period');
+    if (iso || random) fields.push('seed');
+    if (random) {
+      test.seed ??= state.base.case.seed;
+      test.random_interval ??= state.base.case.random_interval;
+      fields.push('random_interval');
+    }
     if (maneuvers && test.scenario !== 'cornering' && pitch) fields.push('ax');
     if ((maneuvers || (iso && test.iso_lateral)) && roll) fields.push('ay');
     if (maneuvers || (iso && test.iso_lateral)) fields.push('ramp');
@@ -420,13 +432,14 @@ export function mountDynamics(host) {
       }));
     }
     aside.append(select('Input condition', scenarioOptions, test.scenario, value => { test.scenario = value; persistCase(); fill(); }));
-    if (bump || iso) {
+    if (targetedRoad) {
       const targets = Object.fromEntries(Object.entries(choices).filter(([key]) => sourceWheels().some(wheel => wheelTargets[key].includes(wheel))));
       aside.append(select('Input wheels', targets, test.target, value => { test.target = value; persistCase(); }));
     }
-    aside.append(numberGrid(test, Object.fromEntries(fields.map(key => [key, caseFields[key]])), persistCase));
+    const labels = { ...caseFields, height: step ? 'Step height (mm)' : random ? 'Height standard deviation (mm)' : caseFields.height };
+    aside.append(numberGrid(test, Object.fromEntries(fields.map(key => [key, labels[key]])), persistCase));
     if ((bump || iso) && pitch) aside.append(check('Apply wheelbase delay to rear inputs', test.rear_delay, value => { test.rear_delay = value; persistCase(); }));
-    if (bump || iso || test.scenario === 'csv') {
+    if (targetedRoad || test.scenario === 'csv') {
       aside.append(check('Use tire contact patch moving average', test.tire_road_filter, value => { test.tire_road_filter = value; persistCase(); }));
     }
     if (iso && roll) aside.append(check('Add lateral acceleration', test.iso_lateral, value => { test.iso_lateral = value; persistCase(); fill(); }));

@@ -655,6 +655,60 @@ class ReducedModelTests(unittest.TestCase):
         self.assertNotEqual(result.signature, simulate(p).signature)
 
 
+class QuarterRoadTests(unittest.TestCase):
+    def test_step_stays_at_the_selected_height_and_starts_from_flat_trim(self):
+        project = default_project()
+        project["model"] = "quarter"
+        case = project["case"]
+        case.update(scenario="step", start=.13, duration=.3, height=12.)
+        road = Road(case, 1.53, ("FL",))
+        self.assertEqual(road.at(np.nextafter(.13, 0.))[0][0], 0.)
+        self.assertEqual(road.at(.13)[0][0], .012)
+        self.assertEqual(road.at(.3)[0][0], .012)
+        self.assertEqual(road.at(.13)[1][0], 0.)
+        self.assertEqual(road.events, (.13,))
+
+        case["start"] = 0.
+        result = simulate(project)
+        self.assertEqual(result.signals["路面 FL [mm]"][0], 12.)
+        self.assertGreater(result.signals["FL [N]"][0], result.signals["FL [N]"][-1])
+        self.assertGreater(np.max(result.signals["FL [mm]"]), 0.)
+
+    def test_random_road_replays_the_same_gaussian_knots_at_any_sample_time(self):
+        project = default_project()
+        project["model"] = "quarter"
+        case = project["case"]
+        case.update(scenario="random", start=.1, duration=.24, height=12., seed=12, random_interval=.02)
+        road = Road(case, 1.53, ("FL",))
+        draws = np.random.default_rng(12).normal(0., .012, 3)
+        z, v, *_ = road.at(.13)
+        self.assertAlmostEqual(z[0], (draws[1] + draws[2]) / 2)
+        self.assertAlmostEqual(v[0], (draws[2] - draws[1]) / .02)
+        road.at(.2)
+        self.assertEqual(road.at(.13)[0][0], z[0])
+        self.assertIn(.1 + .02, road.events)
+        self.assertNotEqual(road.signature(), Road({**case, "seed": 13}, 1.53, ("FL",)).signature())
+
+    def test_new_inputs_are_quarter_only_and_support_contact_patch_filtering(self):
+        project = default_project()
+        case = project["case"]
+        case.update(start=.1, duration=.3, height=12.)
+        for scenario in ("step", "random"):
+            with self.subTest(scenario=scenario):
+                case.update(scenario=scenario, tire_road_filter=False)
+                for model in ("flex", "rigid", "half_fr", "half_lr"):
+                    project["model"] = model
+                    with self.assertRaisesRegex(ValueError, "僅適用於"):
+                        compile_project(project)
+                project["model"] = "quarter"
+                raw = simulate(project)
+                case["tire_road_filter"] = True
+                filtered = simulate(project)
+                self.assertTrue(np.isfinite(filtered.signals["FL [N]"]).all())
+                self.assertNotEqual(raw.signature, filtered.signature)
+                self.assertFalse(np.allclose(raw.signals["路面 FL [mm]"], filtered.signals["路面 FL [mm]"]))
+
+
 class TireRoadFilterTests(unittest.TestCase):
     def test_centered_average_matches_raw_profile_for_each_input(self):
         case = default_project()["case"]

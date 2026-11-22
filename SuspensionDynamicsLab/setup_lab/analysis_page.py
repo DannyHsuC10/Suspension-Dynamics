@@ -9,7 +9,8 @@ import numpy as np
 
 from .chart_base import COLORS, Chart
 from .project import (AERO_DEFAULTS, AXES, BUMP_CASES, CASE_DEFAULTS, CASE_FIELDS, CHANNELS, CORNERS, MANEUVER_CASES,
-                      MODELS, MODEL_SOURCES, PAGE_MODELS, SCENARIOS, TARGET_WHEELS, case_axes, model_corners,
+                      MODELS, MODEL_SOURCES, PAGE_MODELS, QUARTER_ONLY_CASES, SCENARIOS, TARGETED_ROAD_CASES,
+                      TARGET_WHEELS, case_axes, model_corners,
                       read_recording, save_project)
 from .road_profiles import ISO_ROUGHNESS
 from .vehicle_3d import FullVehicleView
@@ -71,12 +72,13 @@ class AnalysisPage(ttk.Frame):
             if row == 3:
                 self.target_widget = widget
         self.case_vars, self.case_widgets = {}, {}
-        case_fields = CASE_FIELDS
-        if family == "quarter":
-            case_fields = {key: spec for key, spec in CASE_FIELDS.items() if key not in ("ax", "ay", "ramp")}
+        hidden_fields = ("ax", "ay", "ramp") if family == "quarter" else ("random_interval",)
+        case_fields = {key: spec for key, spec in CASE_FIELDS.items() if key not in hidden_fields}
         for row, (key, (label, _, _)) in enumerate(case_fields.items(), len(fields)):
             self.case_vars[key] = tk.StringVar()
             self.case_widgets[key] = entry(setup, row, 0, label, self.case_vars[key])
+            if key == "height":
+                self.height_label = setup.grid_slaves(row=row, column=0)[0]
         row = len(fields) + len(case_fields)
         self.delay_widget = ttk.Checkbutton(setup, text="選定後輪延遲（軸距 ÷ 車速）", variable=self.rear_delay,
                                             command=self.case_mode)
@@ -285,18 +287,21 @@ class AnalysisPage(ttk.Frame):
 
         has_ax, has_ay = AXES[model]
         scenario_options = tuple(label for key, label in SCENARIOS.items()
-                                 if (key not in MANEUVER_CASES or has_ax or has_ay) and (key != "cornering" or has_ay))
+                                 if (key not in MANEUVER_CASES or has_ax or has_ay)
+                                 and (key != "cornering" or has_ay)
+                                 and (key not in QUARTER_ONLY_CASES or model == "quarter"))
         self.scenario_widget.configure(values=scenario_options)
         if self.scenario.get() not in scenario_options:
             self.scenario.set(SCENARIOS["bump"])
         scenario = key_for(SCENARIOS, self.scenario.get())
         bump, iso = scenario in BUMP_CASES, scenario in ISO_ROUGHNESS
+        targeted_road = scenario in TARGETED_ROAD_CASES
         ax, ay = case_axes(scenario, AXES[model], self.iso_lateral.get())
         if iso and has_ay:
             self.iso_lateral_widget.grid()
         else:
             self.iso_lateral_widget.grid_remove()
-        if bump or iso or scenario == "csv":
+        if targeted_road or scenario == "csv":
             self.tire_filter_widget.grid()
         else:
             self.tire_filter_widget.grid_remove()
@@ -309,16 +314,22 @@ class AnalysisPage(ttk.Frame):
         active = {"dt", "speed"}
         if scenario != "csv":
             active.update(("duration", "start"))
+        if bump or scenario in QUARTER_ONLY_CASES:
+            active.add("height")
+        self.height_label.configure(text={"step": "階躍高度 (mm)", "random": "高度標準差 (mm)"}.get(
+            scenario, CASE_FIELDS["height"][0]))
         if bump:
-            active.update(("height", "period"))
-        if iso:
+            active.add("period")
+        if iso or scenario == "random":
             active.add("seed")
+        if scenario == "random":
+            active.add("random_interval")
         if ax or ay:
             active.add("ramp")
             active.update(key for key, enabled in (("ax", ax), ("ay", ay)) if enabled)
         for key, widget in self.case_widgets.items():
             widget.configure(state="normal" if key in active else "disabled")
-        self.target_widget.configure(state="readonly" if bump or iso else "disabled")
+        self.target_widget.configure(state="readonly" if targeted_road else "disabled")
         delay_label = "同側後輪追蹤前輪（軸距 ÷ 車速）" if iso else "選定後輪延遲（軸距 ÷ 車速）"
         self.delay_widget.configure(text=delay_label, state="normal" if (bump or iso) and has_ax else "disabled")
         span = f"｜{self.recording[-1][0] - self.recording[0][0]:g} s" if self.recording else ""

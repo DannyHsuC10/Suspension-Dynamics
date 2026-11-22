@@ -367,7 +367,11 @@ def prepare_simulation(project, cancel, notice):
     if cancel():
         raise Cancelled()
     try:
-        equilibrium = vehicle.equilibrium(road.at(0.), road=road)
+        if road.scenario == "step":
+            # Start in flat-road trim even when the step is commanded at t = 0.
+            equilibrium = vehicle.equilibrium(road.at(math.nextafter(0., -1.)))
+        else:
+            equilibrium = vehicle.equilibrium(road.at(0.), road=road)
     except EquilibriumError:
         if road.scenario != "csv":
             raise
@@ -445,7 +449,9 @@ def integrate_samples(vehicle, road, equilibrium, time, cancel, *, tolerance=1e-
             if attempts > max_attempts or h <= 1e-12:
                 raise ValueError("積分無法達到誤差容許值。請檢查極端剛性、阻尼或路面資料。")
             last = now + h
-            if h == end - now and (end == road.replay_start or (road.iso and end in road.iso_onsets)):
+            discontinuity = (end == road.replay_start or end in road.discontinuities
+                             or (road.iso and end in road.iso_onsets))
+            if h == end - now and discontinuity:
                 # Finish from the left before the inputs switch at this event.
                 last = float(np.nextafter(end, now))
             for j, node in enumerate(NODES):

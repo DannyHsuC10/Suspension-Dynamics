@@ -37,6 +37,17 @@ class DesktopTests(unittest.TestCase):
         self.assertIsNone(app.job)
         self.assertIsNotNone(page.result)
 
+    def test_step_and_random_are_listed_only_for_the_quarter_car(self):
+        _, app = self.make_app(default_project())
+        for family, page in app.analysis_pages.items():
+            for scenario in ("step", "random"):
+                self.assertEqual(SCENARIOS[scenario] in page.scenario_widget["values"], family == "quarter")
+        quarter = app.analysis_pages["quarter"]
+        quarter.scenario.set(SCENARIOS["random"])
+        quarter.case_mode()
+        self.assertTrue(quarter.case_widgets["random_interval"].instate(("!disabled",)))
+        self.assertEqual(quarter.case_input()["case"]["random_interval"], .02)
+
     def test_tire_road_filter_and_free_radius_are_collected(self):
         project = default_project()
         del project["tires"]["FL"]["radius"]

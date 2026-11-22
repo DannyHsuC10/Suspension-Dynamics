@@ -1,4 +1,7 @@
-"""Synthetic longitudinal road profiles based on ISO 8608:2016 Annexes B and C."""
+"""Seeded random and ISO 8608 longitudinal road profiles."""
+
+from bisect import bisect_right
+import math
 
 import numpy as np
 
@@ -8,6 +11,32 @@ ISO_REFERENCE_FREQUENCY = .1  # cycles/m
 ISO_FREQUENCY_BAND = (.011, 2.83)  # cycles/m
 PROFILE_LENGTH = 4096.  # m, spatial synthesis period
 PROFILE_SAMPLE_COUNT = 2**18
+
+
+class RandomRoadProfile:
+    """Gaussian height knots joined by straight segments."""
+
+    def __init__(self, start, duration, interval, height_std, seed):
+        count = math.ceil((duration - start) / interval) + 2
+        self.times = tuple(start + i * interval for i in range(count))
+        self.height = np.random.default_rng(seed).normal(0., height_std, count)
+        self.height[0] = 0.
+        dt = np.diff(self.times)
+        self.velocity = np.diff(self.height) / dt
+        area = dt * (self.height[:-1] + self.height[1:]) / 2
+        self.integral = np.concatenate(([0.], np.cumsum(area)))
+
+    def sample(self, time):
+        """Return height, velocity, and integrated height at a time."""
+        index = bisect_right(self.times, time) - 1
+        if index < 0:
+            return 0., 0., 0.
+        elapsed = time - self.times[index]
+        initial_height = self.height[index]
+        slope = self.velocity[index] if index < len(self.velocity) else 0.
+        height = initial_height + slope * elapsed
+        area = self.integral[index] + elapsed * (initial_height + height) / 2
+        return height, slope, area
 
 
 class IsoRoadProfile:

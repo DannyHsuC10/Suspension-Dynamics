@@ -28,12 +28,14 @@ MODEL_SOURCES = {"quarter": {c: c for c in CORNERS}, "half_lr": {"front": "前�
 DEFAULT_SOURCES = {model: next(iter(choices)) for model, choices in MODEL_SOURCES.items()}
 AXES = {"rigid": (True, True), "flex": (True, True), "quarter": (False, False),
         "half_lr": (False, True), "half_fr": (True, False)}
-SCENARIOS = {"bump": "凸塊／凹坑", **{key: f"ISO 8608 Class {key[-1].upper()}" for key in ISO_ROUGHNESS},
+SCENARIOS = {"bump": "凸塊／凹坑", "step": "路面階躍 (Step)", "random": "隨機路面 (Random)", **{key: f"ISO 8608 Class {key[-1].upper()}" for key in ISO_ROUGHNESS},
              "cornering": "側向加速度（轉彎）", "maneuver": "煞車／加速／轉彎",
              "combined": "凸塊＋加速度", "csv": "量測 CSV 回放"}
 BUMP_CASES = ("bump", "combined")
+QUARTER_ONLY_CASES = ("step", "random")
+TARGETED_ROAD_CASES = (*BUMP_CASES, *QUARTER_ONLY_CASES, *ISO_ROUGHNESS)
 MANEUVER_CASES = ("maneuver", "combined")
-CASE_DEFAULTS = {"seed": 0, "iso_lateral": False, "tire_road_filter": False}
+CASE_DEFAULTS = {"seed": 0, "random_interval": .02, "iso_lateral": False, "tire_road_filter": False}
 DEFAULT_TIRE_RADIUS_M = .22
 DEFAULT_DAMPER_SWITCH_SPEED = .1
 DEFAULT_TENDER_COMPRESSION_MM = 4.3
@@ -76,6 +78,7 @@ CASE_FIELDS = {
     "start": ("輸入開始 (s)", 0, 120), "height": ("凸塊高度 (mm)", -1000, 1000),
     "period": ("通過凸塊時間 (s)", .002, 120), "speed": ("車速 (m/s)", 0, 150),
     "seed": ("路面隨機種子", 0, 2**32 - 1),
+    "random_interval": ("隨機路面節點間隔 (s)", .0001, 120),
     "ax": ("縱向加速度 ax (m/s²)", -100, 100), "ay": ("側向加速度 ay (m/s²)", -100, 100),
     "ramp": ("加速度上升時間 (s)", .002, 120),
 }
@@ -420,22 +423,31 @@ def validate_case(model, sources, case):
     if scenario not in SCENARIOS or case["target"] not in TARGET_WHEELS or type(case["rear_delay"]) is not bool:
         raise ValueError("工況、作用輪位或後軸延遲設定有誤。")
     if scenario in MANEUVER_CASES and not any(AXES[model]):
-        raise ValueError("1/4 車請使用凸塊／凹坑、ISO 路面或路面 CSV 回放。")
+        raise ValueError("請為 1/4 車模型選擇路面輸入工況。")
+    if scenario in QUARTER_ONLY_CASES and model != "quarter":
+        raise ValueError("路面階躍與隨機路面僅適用於 1/4 車模型。")
     if scenario == "cornering" and not AXES[model][1]:
         raise ValueError("側向加速度工況適用於全車及 1/2 左右模型。")
     if type(case.get("iso_lateral", CASE_DEFAULTS["iso_lateral"])) is not bool:
         raise ValueError("ISO 路面側向加速度開關設定有誤。")
     if type(case.get("tire_road_filter", CASE_DEFAULTS["tire_road_filter"])) is not bool:
         raise ValueError("輪胎接地濾波開關設定有誤。")
-    if scenario in BUMP_CASES or scenario in ISO_ROUGHNESS:
+    if scenario in TARGETED_ROAD_CASES:
         if not set(model_corners(model, sources)).intersection(TARGET_WHEELS[case["target"]]):
             raise ValueError("路面作用輪位不在選定模型的輪位中。")
     delayed_bump = scenario in BUMP_CASES and case["rear_delay"] and AXES[model][0]
     if (scenario in ISO_ROUGHNESS or delayed_bump) and case["speed"] < .1:
         raise ValueError("ISO 路面及凸塊後輪延遲需要至少 0.1 m/s 的車速。")
-    if scenario in ISO_ROUGHNESS:
+    if scenario in ISO_ROUGHNESS or scenario == "random":
         if not float(case.get("seed", CASE_DEFAULTS["seed"])).is_integer():
-            raise ValueError("ISO 路面隨機種子須為整數。")
+            raise ValueError("路面隨機種子須為整數。")
+    if scenario == "random":
+        if case["height"] < 0:
+            raise ValueError("隨機路面高度標準差不可小於零。")
+        interval = case.get("random_interval", CASE_DEFAULTS["random_interval"])
+        if (case["duration"] - case["start"]) / interval > 200000:
+            raise ValueError("隨機路面節點過多，請增加節點間隔。")
+    if scenario in ISO_ROUGHNESS:
         limit = .5 / (ISO_FREQUENCY_BAND[1] * case["speed"])
         if case["dt"] >= limit:
             raise ValueError(f"以目前車速取樣 ISO 路面時，輸出間隔須小於 {limit:.6g} s。")

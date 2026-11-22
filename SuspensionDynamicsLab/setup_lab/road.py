@@ -5,8 +5,8 @@ import math
 
 import numpy as np
 
-from .project import BUMP_CASES, CASE_DEFAULTS, CORNERS, TARGET_WHEELS, case_axes
-from .road_profiles import ISO_ROUGHNESS, IsoRoadProfile
+from .project import BUMP_CASES, CASE_DEFAULTS, CORNERS, TARGETED_ROAD_CASES, TARGET_WHEELS, case_axes
+from .road_profiles import ISO_ROUGHNESS, IsoRoadProfile, RandomRoadProfile
 
 
 class Road:
@@ -18,9 +18,11 @@ class Road:
         self.replay_start = 0.
         self.bump = self.scenario in BUMP_CASES
         self.iso = self.scenario in ISO_ROUGHNESS
+        targeted_road = self.scenario in TARGETED_ROAD_CASES
         self.tire_filter = (options.get("tire_road_filter", False) and options["speed"] > 0
-                            and (self.bump or self.iso or self.scenario == "csv"))
+                            and (targeted_road or self.scenario == "csv"))
         self.filter_tracks = {}
+        self.discontinuities = set()
         command_axes = case_axes(self.scenario, axes, options.get("iso_lateral", CASE_DEFAULTS["iso_lateral"]))
         self.maneuver = any(command_axes)
         self.onsets = []
@@ -54,12 +56,22 @@ class Road:
         delay = wheelbase / options["speed"] if follow_front else 0.
         selected = TARGET_WHEELS[options["target"]]
         self.onsets = [(index, options["start"] + (delay if corner.startswith("R") else 0.))
-                       for index, corner in enumerate(corners) if corner in selected and (self.bump or self.iso)]
+                       for index, corner in enumerate(corners) if corner in selected and targeted_road]
         boundaries = {options["start"], options["start"] + options["ramp"]} if self.maneuver else set()
         for _, start in self.onsets:
             boundaries.add(start)
             if self.bump:
                 boundaries.add(start + options["period"])
+        if self.scenario == "step":
+            self.discontinuities.update(start for _, start in self.onsets)
+        elif self.scenario == "random":
+            self.seed = int(options.get("seed", CASE_DEFAULTS["seed"]))
+            self.random_interval = options.get("random_interval", CASE_DEFAULTS["random_interval"])
+            self.random_profile = RandomRoadProfile(options["start"], self.duration, self.random_interval,
+                                                    options["height"] / 1000, self.seed)
+            if self.onsets:
+                self.discontinuities.update(t for t in self.random_profile.times if t <= self.duration)
+        boundaries.update(self.discontinuities)
         if self.iso:
             self.seed = int(options.get("seed", CASE_DEFAULTS["seed"]))
             track_corners = [corners[index] for index, _ in self.onsets]
@@ -123,7 +135,11 @@ class Road:
         else:
             for index, start in self.onsets:
                 elapsed = time - start
-                if 0 < elapsed < o["period"]:
+                if self.scenario == "step":
+                    height[index] = o["height"] / 1000 if time >= start else 0.
+                elif self.scenario == "random":
+                    height[index], speed[index], _ = self.random_profile.sample(time)
+                elif 0 < elapsed < o["period"]:
                     phase = math.tau * elapsed / o["period"]
                     height[index] = o["height"] * (1 - math.cos(phase)) / 2000
                     speed[index] = o["height"] * math.pi / (1000 * o["period"]) * math.sin(phase)
@@ -158,6 +174,12 @@ class Road:
             speed = self.options["speed"]
             height, area = profile.height_and_integral(speed * (time - start))
             return height, area / speed
+        if self.scenario == "step":
+            height = self.options["height"] / 1000 if time >= start else 0.
+            return height, max(0., time - start) * height
+        if self.scenario == "random":
+            height, _, area = self.random_profile.sample(time)
+            return height, area
         period = self.options["period"]
         elapsed = min(period, max(0., time - start))
         scale = self.options["height"] / 2000
@@ -181,6 +203,10 @@ class Road:
         track = ()
         if self.bump:
             track = (tuple(self.onsets), o["height"], o["period"])
+        elif self.scenario == "step":
+            track = (tuple(self.onsets), o["height"])
+        elif self.scenario == "random":
+            track = (tuple(self.onsets), o["height"], self.seed, self.random_interval)
         elif self.iso:
             track = (tuple(self.onsets), o["speed"], self.seed, self.iso_tracks)
         maneuver = (o["start"], o["ramp"], *self.command) if self.maneuver and any(self.command) else ()
