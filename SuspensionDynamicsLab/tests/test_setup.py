@@ -655,6 +655,48 @@ class ReducedModelTests(unittest.TestCase):
         self.assertNotEqual(result.signature, simulate(p).signature)
 
 
+class TireRoadFilterTests(unittest.TestCase):
+    def test_centered_average_matches_raw_profile_for_each_input(self):
+        case = default_project()["case"]
+        case.update(start=.2, period=.05, tire_road_filter=True, recording=[
+            [0., 0., 0., 0., 0., 0., 0.], [.21, 0., 0., 0., 0., -2., 0.],
+            [.24, 15., 0., 0., 0., -3., 0.], [.31, 0., 0., 0., 0., 0., 0.],
+        ])
+        time, half_window = .23, .025
+        points = time + half_window * ((np.arange(2000) + .5) / 1000 - 1)
+        for scenario in ("bump", "iso_c", "csv"):
+            with self.subTest(scenario=scenario):
+                road = Road({**case, "scenario": scenario}, 1.53)
+                height, velocity = road.average(0, time, half_window)
+                raw_heights = [road.at(t)[0][0] for t in points]
+                self.assertAlmostEqual(height, np.mean(raw_heights), places=8)
+                left = road.at(time - half_window)[0][0]
+                right = road.at(time + half_window)[0][0]
+                self.assertAlmostEqual(velocity, (right - left) / (2 * half_window), places=10)
+
+    def test_bump_load_sets_the_working_radius_and_contact_window(self):
+        project = default_project()
+        project["model"] = "quarter"
+        project["case"].update(duration=.35, start=.2, period=.014)
+        del project["case"]["tire_road_filter"]
+        del project["tires"]["FL"]["radius"]
+        raw = simulate(project)
+        project["case"]["tire_road_filter"] = True
+        project["tires"]["FL"].update(radius=.25, k=90.)
+        effective = simulate(project)
+        load = effective.signals["FL [N]"]
+        radius = effective.signals["FL 輪胎工作半徑 [mm]"] / 1000
+        np.testing.assert_allclose(radius, .25 - load / 90000, atol=1e-12)
+        road = Road(project["case"], 1.53, ("FL",))
+        index = np.argmin(abs(effective.time - .206))
+        half_window = sqrt(.25**2 - radius[index]**2) / project["case"]["speed"]
+        expected, _ = road.average(0, effective.time[index], half_window)
+        actual = effective.signals["路面 FL [mm]"] / 1000
+        self.assertAlmostEqual(actual[index], expected, places=8)
+        self.assertLess(np.max(actual), np.max(raw.signals["路面 FL [mm]"]) / 1000)
+        self.assertNotEqual(effective.signature, raw.signature)
+
+
 class IsoRoadTests(unittest.TestCase):
     def test_four_wheel_profiles_repeat_and_match_submodels(self):
         case = default_project()["case"]

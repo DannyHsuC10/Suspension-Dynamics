@@ -30,8 +30,14 @@ class IsoRoadProfile:
         self.height -= self.height[0]
         self.slope = np.fft.irfft(2j * np.pi * frequencies * spectrum, n=PROFILE_SAMPLE_COUNT)
 
-    def at(self, distance):
-        """Return height and spatial slope using the same cubic interpolant."""
+    def prepare_integral(self):
+        next_height = np.roll(self.height, -1)
+        next_slope = np.roll(self.slope, -1)
+        area = self.spacing * ((self.height + next_height) / 2
+                               + self.spacing * (self.slope - next_slope) / 12)
+        self.integral = np.concatenate(([0.], np.cumsum(area)))
+
+    def _segment(self, distance):
         position = (distance % PROFILE_LENGTH) / self.spacing
         u = position % 1
         index = int(position) % PROFILE_SAMPLE_COUNT
@@ -42,6 +48,20 @@ class IsoRoadProfile:
         right_slope = self.slope[next_index] * self.spacing
         quadratic = 3 * change - 2 * left_slope - right_slope
         cubic = -2 * change + left_slope + right_slope
+        return index, u, height, left_slope, quadratic, cubic
+
+    def at(self, distance):
+        """Return height and spatial slope using the same cubic interpolant."""
+        _, u, height, left_slope, quadratic, cubic = self._segment(distance)
         value = height + u * (left_slope + u * (quadratic + u * cubic))
         slope = (left_slope + u * (2 * quadratic + u * 3 * cubic)) / self.spacing
         return value, slope
+
+    def height_and_integral(self, distance):
+        """Return height and the integral from the start of the track."""
+        if distance <= 0:
+            return 0., 0.
+        index, u, height, left_slope, quadratic, cubic = self._segment(distance)
+        value = height + u * (left_slope + u * (quadratic + u * cubic))
+        area = self.spacing * u * (height + u * (left_slope / 2 + u * (quadratic / 3 + u * cubic / 4)))
+        return value, self.integral[index] + area + (distance // PROFILE_LENGTH) * self.integral[-1]

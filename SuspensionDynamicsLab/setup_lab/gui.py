@@ -18,9 +18,10 @@ from .geometry_lookup import VEHICLE_KEYS as GEOMETRY_VEHICLE_KEYS
 from .geometry_page import GeometryPage
 from .load_transfer_page import LoadTransferPage, TireAnalysisPage
 from .project import (AERO_DEFAULTS, CHANNELS, COMPONENT_FIELDS, CORNERS, DAMPER_FORCE_LABELS,
-                      DEFAULT_DAMPER_SWITCH_SPEED, DEFAULT_SOURCES, MODEL_PAGE, MODEL_SOURCES, PAGE_MODELS, ROLL_FRAME_FIELDS,
-                      TIRE_FIELDS, VEHICLE_FIELDS, analysis_page_cases, channel_enabled, compile_project, damping_reference_mass,
-                      default_project, load_transfer_options, model_channels, model_corners, open_project, project_roll_frame,
+                      DEFAULT_DAMPER_SWITCH_SPEED, DEFAULT_SOURCES, DEFAULT_TIRE_RADIUS_M, MODEL_PAGE, MODEL_SOURCES,
+                      PAGE_MODELS, ROLL_FRAME_FIELDS, TIRE_FIELDS, VEHICLE_FIELDS, analysis_page_cases, channel_enabled,
+                      compile_project, damping_reference_mass, default_project, load_transfer_options, model_channels,
+                      model_corners, open_project, project_roll_frame,
                       read_force_csv, roll_frame_options, save_project, transfer_options,
                       with_static_tender_travel, with_total_limit_rates)
 from .roll_center_scan import scan_roll_center
@@ -281,7 +282,7 @@ class SetupApp:
         self.roll_frame_mode()
         for corner, variables in self.tire_vars.items():
             for key, var in variables.items():
-                var.set(project["tires"][corner][key])
+                var.set(project["tires"][corner].get(key, DEFAULT_TIRE_RADIUS_M))
         self.drafts = {}
         for key, component in project["channels"].items():
             self.drafts[key] = component.copy()
@@ -609,7 +610,7 @@ class SetupApp:
         if self.current_channel in self.applicable_channels and channel_enabled(settings, self.analysis.family):
             try:
                 vehicle, road = prepare_vehicle(self.collect())
-                vehicle.equilibrium(road.at(0.), include_aero=False)
+                vehicle.equilibrium(road.at(0.), include_aero=False, road=road)
                 channel_index = tuple(CHANNELS).index(self.current_channel)
                 component = next(kc for i, kc in vehicle.active if i == channel_index)
                 notes.append(f"{PAGE_TITLES[self.analysis.family]}無空力靜態軸心 {component.static_stroke:.3g} mm")

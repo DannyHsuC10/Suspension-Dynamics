@@ -8,7 +8,8 @@ import math
 import numpy as np
 
 from .geometry_lookup import GeometryLookup, FIELDS as GEOMETRY_FIELDS
-from .project import (AERO_DEFAULTS, AXES, CHANNELS, CORNERS, QUARTER_MODAL_CHANNELS, channel_enabled, compile_project, downforce,
+from .project import (AERO_DEFAULTS, AXES, CHANNELS, CORNERS, DEFAULT_TIRE_RADIUS_M, QUARTER_MODAL_CHANNELS,
+                      channel_enabled, compile_project, downforce,
                       model_channels, model_corners, project_roll_frame)
 from .road import Road
 from .road_profiles import ISO_FREQUENCY_BAND
@@ -18,6 +19,11 @@ REPLAY_LEAD_IN_SECONDS = .5
 # v13 Hydraulic_system and Modal_to_corner are the two directions of this map.
 MODAL = np.array([[1, 1, 0, 0], [0, 0, 1, 1], [1, -1, 0, 0], [0, 0, 1, -1],
                   [1, -1, 1, -1], [1, -1, -1, 1], *np.eye(4)])
+
+
+def tire_working_radius(free_radius, load, stiffness):
+    """Radius under vertical load, limited at the wheel centre."""
+    return np.maximum(0., free_radius - load / stiffness)
 
 
 class Cancelled(Exception):
@@ -108,6 +114,7 @@ class Vehicle:
                        if key in allowed and component.enabled]
         self.tire_k = np.array([project["tires"][c]["k"] * 1000 for c in self.corners])
         self.tire_c = np.array([project["tires"][c]["c"] for c in self.corners])
+        self.tire_radius = np.array([project["tires"][c].get("radius", DEFAULT_TIRE_RADIUS_M) for c in self.corners])
         self.weight = np.zeros(self.n)
         self.weight[0], self.weight[self.wheels] = -G * self.sprung, -G * mu
         aero = project.get("aero", AERO_DEFAULTS)
@@ -128,6 +135,53 @@ class Vehicle:
         # Fade viscous force into contact over the first millimetre of compression.
         contact = np.minimum(1., penetration / .001)
         return np.maximum(0., self.tire_k * penetration + contact * self.tire_c * (road_velocity - v[self.wheels]))
+
+    def road_inputs(self, road, time, q, v, *, static=False):
+        height, speed, ax, ay = road.at(time)
+        if road.tire_filter and time >= road.replay_start:
+            for index in road.filter_tracks:
+                height[index], speed[index] = self._filter_wheel(
+                    road, time, index, q[self.wheels.start + index], v[self.wheels.start + index],
+                    height[index], speed[index], static=static,
+                )
+        return height, speed, ax, ay
+
+    def _filter_wheel(self, road, time, index, hub, hub_speed, height, slope, *, static):
+        k, c = float(self.tire_k[index]), float(self.tire_c[index])
+        radius = float(self.tire_radius[index])
+        speed = road.options["speed"]
+        raw = height, slope
+        tolerance = 1e-7  # metres of half-window length
+
+        def half_length(inputs):
+            z, dz_dt = inputs
+            penetration = max(0., z - hub)
+            damping = 0. if static else min(1., penetration / .001) * c * (dz_dt - hub_speed)
+            load = max(0., k * penetration + damping)
+            working_radius = tire_working_radius(radius, load, k)
+            return math.sqrt((radius - working_radius) * (radius + working_radius))
+
+        def average(length):
+            return road.average(index, time, length / speed) if length > tolerance else raw
+
+        # The force and window depend on each other. Solve at the current stage
+        # without carrying state between adaptive integration attempts.
+        length = half_length(raw)
+        for _ in range(8):
+            inputs = average(length)
+            updated = half_length(inputs)
+            if abs(updated - length) <= tolerance:
+                return inputs
+            length = updated
+
+        low, high = 0., radius
+        while high - low > tolerance:
+            length = (low + high) / 2
+            if half_length(average(length)) > length:
+                low = length
+            else:
+                high = length
+        return average((low + high) / 2)
 
     def roll_center_forces(self, ay, axle_travel):
         rc = (self.rc_front * self.geometry.value("h_rc_f", axle_travel)
@@ -194,31 +248,38 @@ class Vehicle:
         acceleration = total / self.mass
         return (acceleration, tire, readings, suspension, twist_moment) if details else acceleration
 
-    def equilibrium(self, inputs, *, include_aero=True):
+    def equilibrium(self, inputs, *, include_aero=True, road=None):
         for _, component in self.active:
             component.set_static_reference(None)
         # Locate the stops and Tender transitions from the trim before applying downforce.
         height, speed, ax, ay = inputs
         reference_inputs = (height, speed, 0., 0.) if self.uses_geometry_lookup else inputs
-        reference = self._solve_equilibrium(reference_inputs, include_aero=False)
+        reference = self._solve_equilibrium(reference_inputs, include_aero=False, road=road)
         self.geometry_reference_mm = self.axle_travel @ reference * 1000
         self.tender_reference_wheel_mm = (self.travel @ reference) * 1000
         travel_mm = (self.channel_travel @ reference) * 1000
         for i, component in self.active:
             component.set_static_reference(component.motion_ratio.integrated(travel_mm[i]))
         if (include_aero and self.aero_load) or (self.uses_geometry_lookup and (ax or ay)):
-            return self._solve_equilibrium(inputs, include_aero=include_aero, initial=reference)
+            return self._solve_equilibrium(inputs, include_aero=include_aero, initial=reference, road=road)
         return reference
 
-    def _solve_equilibrium(self, inputs, *, include_aero, initial=None):
+    def _solve_equilibrium(self, inputs, *, include_aero, initial=None, road=None):
         height, _, ax, ay = inputs
         zero_wheel, zero = np.zeros(self.nw), np.zeros(self.n)
-        static_input = (height, zero_wheel, ax, ay)
+        static_input = height, zero_wheel, ax, ay
+
+        def static_inputs(q):
+            if road is not None and road.tire_filter:
+                effective, *_ = self.road_inputs(road, 0., q, zero, static=True)
+                return effective, zero_wheel, ax, ay
+            return static_input
+
         eps = 1e-7
         differences = np.eye(self.n) * eps
 
         def residual(q):
-            return self.forces(q, zero, static_input, include_aero=include_aero, steady_frame=True) * self.mass
+            return self.forces(q, zero, static_inputs(q), include_aero=include_aero, steady_frame=True) * self.mass
 
         def tangent(q):
             return np.column_stack([(residual(q + step) - residual(q - step)) / (2 * eps) for step in differences])
@@ -240,7 +301,8 @@ class Vehicle:
                     physical = self.wheels.stop
                     static_jacobian = jacobian[:physical, :physical]
                     stiffness = -(static_jacobian + static_jacobian.T) / 2
-                    if np.linalg.eigvalsh(stiffness)[0] > 1e-7 and np.all(self.tire_load(q, zero, height, zero_wheel) > 0):
+                    effective, *_ = static_inputs(q)
+                    if np.linalg.eigvalsh(stiffness)[0] > 1e-7 and np.all(self.tire_load(q, zero, effective, zero_wheel) > 0):
                         return q
                     break
                 try:
@@ -305,7 +367,7 @@ def prepare_simulation(project, cancel, notice):
     if cancel():
         raise Cancelled()
     try:
-        equilibrium = vehicle.equilibrium(road.at(0.))
+        equilibrium = vehicle.equilibrium(road.at(0.), road=road)
     except EquilibriumError:
         if road.scenario != "csv":
             raise
@@ -313,7 +375,7 @@ def prepare_simulation(project, cancel, notice):
             raise Cancelled()
         road.prepend_zero_input(REPLAY_LEAD_IN_SECONDS)
         try:
-            equilibrium = vehicle.equilibrium(road.at(0.), include_aero=False)
+            equilibrium = vehicle.equilibrium(road.at(0.), include_aero=False, road=road)
         except EquilibriumError as exc:
             raise EquilibriumError(f"LapData 首筆與零輸入工況皆無法建立靜態平衡。{exc}") from exc
         if cancel():
@@ -390,7 +452,8 @@ def integrate_samples(vehicle, road, equilibrium, time, cancel, *, tolerance=1e-
                 trial = state + h * (STAGES[j, :j] @ stages[:j])
                 stages[j, :n] = trial[n:]
                 t = last if node == 1. else now + node * h
-                stages[j, n:] = vehicle.forces(equilibrium + trial[:n], trial[n:], road.at(t),
+                q, v = equilibrium + trial[:n], trial[n:]
+                stages[j, n:] = vehicle.forces(q, v, vehicle.road_inputs(road, t, q, v),
                                                include_aero=t >= road.replay_start)
             scale = tolerance * (0.01 + np.maximum(np.abs(state), np.abs(trial)))
             error = float(np.max(np.abs(h * (ERROR @ stages)) / scale))
@@ -446,7 +509,7 @@ def make_result(vehicle, road, project, equilibrium, time, history, steps, cance
     for i, t in enumerate(time):
         if i % 128 == 0 and cancel():
             raise Cancelled()
-        inputs = road.at(t)
+        inputs = vehicle.road_inputs(road, t, q[i], v[i])
         roads[i], command[i] = inputs[0], inputs[2:]
         acceleration[i], loads[i], readings[i], suspension[i], twist[i] = vehicle.forces(
             q[i], v[i], inputs, True, include_aero=include_aero[i]
@@ -519,8 +582,10 @@ def make_result(vehicle, road, project, equilibrium, time, history, steps, cance
         disabled = [CHANNELS[key] for key in modes if not channel_enabled(project["channels"][key], "quarter")]
         if disabled:
             warnings.append("單輪模型未計入已停用的通道：" + "、".join(disabled) + "。")
+    working_radii = tire_working_radius(vehicle.tire_radius, loads, vehicle.tire_k)
     for i, corner in enumerate(vehicle.corners):
         add("輪荷", corner, "N", loads[:, i])
+        add("輪胎工作半徑", f"{corner} 輪胎工作半徑", "mm", working_radii[:, i] * 1000)
         add("輪端行程", f"{corner} 輪端行程", "mm", travel[:, i])
         add("輪端懸吊力", f"{corner} 輪端懸吊力", "N", suspension[:, i])
         add("輪端位移", corner, "mm", history[:, nb + i] * 1000)
@@ -573,7 +638,7 @@ def make_result(vehicle, road, project, equilibrium, time, history, steps, cance
         warnings.append("模擬結束時，加速度仍未升至設定值。")
     heave_a2 = acceleration[:, 0]**2
     metrics["body_rms"] = math.sqrt(np.sum((heave_a2[1:] + heave_a2[:-1]) * elapsed / 2) / time[-1])
-    signature = (project["model"], vehicle.corners, road.signature(), project["case"]["speed"])
+    signature = (project["model"], vehicle.corners, road.signature(), project["case"]["speed"], road.tire_filter)
     # Metres at the body attachment, wheel centre offset and road for each corner.
     motion = np.stack((q[:, :nb] @ vehicle.B.T, q[:, vehicle.wheels], roads), axis=-1)
     return Result(time, signals, groups, project, signature, metrics, warnings, steps, vehicle.corners, motion,

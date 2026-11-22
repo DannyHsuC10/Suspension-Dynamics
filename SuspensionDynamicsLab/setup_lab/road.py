@@ -18,6 +18,9 @@ class Road:
         self.replay_start = 0.
         self.bump = self.scenario in BUMP_CASES
         self.iso = self.scenario in ISO_ROUGHNESS
+        self.tire_filter = (options.get("tire_road_filter", False) and options["speed"] > 0
+                            and (self.bump or self.iso or self.scenario == "csv"))
+        self.filter_tracks = {}
         command_axes = case_axes(self.scenario, axes, options.get("iso_lateral", CASE_DEFAULTS["iso_lateral"]))
         self.maneuver = any(command_axes)
         self.onsets = []
@@ -36,6 +39,13 @@ class Road:
             w_left = np.broadcast_to(2 * dt[1:] + dt[:-1], same.shape)[same]
             w_right = np.broadcast_to(dt[1:] + 2 * dt[:-1], same.shape)[same]
             self.slopes[1:-1][same] = (w_left + w_right) / (w_left / left[same] + w_right / right[same])
+            if self.tire_filter:
+                self.filter_tracks = dict.fromkeys(range(self.wheel_count), (0., None))
+                self.quadratic = 3 * self.secants - 2 * self.slopes[:-1] - self.slopes[1:]
+                self.cubic = self.slopes[:-1] + self.slopes[1:] - 2 * self.secants
+                area = dt * (self.heights[:-1] + dt * (
+                    self.slopes[:-1] / 2 + self.quadratic / 3 + self.cubic / 4))
+                self.integral = np.vstack((np.zeros(self.wheel_count), np.cumsum(area, axis=0)))
             self.events = self.times
             return
 
@@ -61,7 +71,13 @@ class Road:
             for (index, start), track in zip(self.onsets, self.iso_tracks):
                 if track not in profiles:
                     profiles[track] = IsoRoadProfile(ISO_ROUGHNESS[self.scenario], self.seed, track=track)
+                    if self.tire_filter:
+                        profiles[track].prepare_integral()
                 self.iso_onsets.setdefault(start, []).append((index, profiles[track]))
+                if self.tire_filter:
+                    self.filter_tracks[index] = (start, profiles[track])
+        elif self.tire_filter:
+            self.filter_tracks = {index: (start, None) for index, start in self.onsets}
         self.events = tuple(sorted(t for t in boundaries if 0 < t < self.duration))
 
     def prepend_zero_input(self, seconds):
@@ -117,6 +133,45 @@ class Road:
             blend = (1 - math.cos(math.pi * fraction)) / 2
             ax, ay = (value * blend for value in self.command)
         return height, speed, ax, ay
+
+    def _csv_height_and_integral(self, index, time):
+        if time <= 0:
+            height = self.heights[0, index]
+            return height, time * height
+        if time >= self.times[-1]:
+            height = self.heights[-1, index]
+            return height, self.integral[-1, index] + (time - self.times[-1]) * height
+        i = bisect_right(self.times, time) - 1
+        elapsed = time - self.times[i]
+        u = elapsed / (self.times[i + 1] - self.times[i])
+        height, slope = self.heights[i, index], self.slopes[i, index]
+        a, b = self.quadratic[i, index], self.cubic[i, index]
+        area = elapsed * (height + elapsed * (slope / 2 + u * (a / 3 + u * b / 4)))
+        height += elapsed * (slope + u * (a + u * b))
+        return height, self.integral[i, index] + area
+
+    def _height_and_integral(self, index, time):
+        start, profile = self.filter_tracks[index]
+        if self.scenario == "csv":
+            return self._csv_height_and_integral(index, time - self.replay_start)
+        if self.iso:
+            speed = self.options["speed"]
+            height, area = profile.height_and_integral(speed * (time - start))
+            return height, area / speed
+        period = self.options["period"]
+        elapsed = min(period, max(0., time - start))
+        scale = self.options["height"] / 2000
+        omega = math.tau / period
+        phase = omega * elapsed
+        height = scale * (1 - math.cos(phase))
+        return height, scale * (elapsed - math.sin(phase) / omega)
+
+    def average(self, index, time, half_window):
+        """Return the centered box average and its velocity at fixed window width."""
+        left, left_area = self._height_and_integral(index, time - half_window)
+        right, right_area = self._height_and_integral(index, time + half_window)
+        width = 2 * half_window
+        return (right_area - left_area) / width, (right - left) / width
 
     def signature(self):
         o = self.options

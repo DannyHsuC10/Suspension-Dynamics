@@ -37,6 +37,20 @@ class DesktopTests(unittest.TestCase):
         self.assertIsNone(app.job)
         self.assertIsNotNone(page.result)
 
+    def test_tire_road_filter_and_free_radius_are_collected(self):
+        project = default_project()
+        del project["tires"]["FL"]["radius"]
+        del project["case"]["tire_road_filter"]
+        _, app = self.make_app(project)
+        page = app.analysis_pages["full"]
+        self.assertEqual(float(app.tire_vars["FL"]["radius"].get()), .22)
+        self.assertFalse(page.tire_road_filter.get())
+        app.tire_vars["FL"]["radius"].set(".25")
+        page.tire_filter_widget.invoke()
+        collected = app.collect(page, include_pages=True)
+        self.assertEqual(collected["tires"]["FL"]["radius"], .25)
+        self.assertTrue(collected["case"]["tire_road_filter"])
+
     def test_lap_recording_prompts_before_filling_missing_road_columns(self):
         root, app = self.make_app(default_project())
         page = app.analysis_pages["full"]

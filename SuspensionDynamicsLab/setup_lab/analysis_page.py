@@ -53,6 +53,7 @@ class AnalysisPage(ttk.Frame):
         self.full_source = tk.StringVar(value="四輪")
         self.rear_delay = tk.BooleanVar()
         self.iso_lateral = tk.BooleanVar()
+        self.tire_road_filter = tk.BooleanVar()
         fields = (("懸吊模型", self.models, self.model), ("模型輪位", {}, self.full_source),
                   ("輸入工況", SCENARIOS, self.scenario), ("作用輪位", TARGET_LABELS, self.target))
         for row, (label, choices, variable) in enumerate(fields):
@@ -84,6 +85,9 @@ class AnalysisPage(ttk.Frame):
         self.iso_lateral_widget = ttk.Checkbutton(setup, text="疊加側向加速度 ay", variable=self.iso_lateral,
                                                   command=self.case_mode)
         self.iso_lateral_widget.grid(row=row, columnspan=2, sticky="w", pady=(0, 5))
+        row += 1
+        self.tire_filter_widget = ttk.Checkbutton(setup, text="使用輪胎接地移動平均濾波", variable=self.tire_road_filter)
+        self.tire_filter_widget.grid(row=row, columnspan=2, sticky="w", pady=(0, 5))
         ttk.Button(setup, text="載入路面與加速度 CSV", command=self.load_recording).grid(row=row + 1, columnspan=2, sticky="ew")
         self.recording_label = tk.StringVar()
         ttk.Label(setup, textvariable=self.recording_label, wraplength=275).grid(row=row + 2, columnspan=2, sticky="w", pady=4)
@@ -172,6 +176,7 @@ class AnalysisPage(ttk.Frame):
         self.target.set(TARGET_LABELS[case["target"]])
         self.rear_delay.set(case["rear_delay"])
         self.iso_lateral.set(case.get("iso_lateral", CASE_DEFAULTS["iso_lateral"]))
+        self.tire_road_filter.set(case.get("tire_road_filter", CASE_DEFAULTS["tire_road_filter"]))
         for key, var in self.case_vars.items():
             var.set(case.get(key, CASE_DEFAULTS.get(key)))
         self.recording, self.recording_name = case["recording"], case["recording_name"]
@@ -259,7 +264,8 @@ class AnalysisPage(ttk.Frame):
             raise ValueError("工況欄位須填入數值。") from exc
         case = {**self.case, **values, "scenario": key_for(SCENARIOS, self.scenario.get()),
                 "target": key_for(TARGET_LABELS, self.target.get()), "rear_delay": self.rear_delay.get(),
-                "iso_lateral": self.iso_lateral.get(), "recording": self.recording, "recording_name": self.recording_name}
+                "iso_lateral": self.iso_lateral.get(), "tire_road_filter": self.tire_road_filter.get(),
+                "recording": self.recording, "recording_name": self.recording_name}
         case.pop("quarter_mr", None)
         case.pop("roll_center_frame", None)
         return {"model": self.model_key, "case": case}
@@ -290,6 +296,10 @@ class AnalysisPage(ttk.Frame):
             self.iso_lateral_widget.grid()
         else:
             self.iso_lateral_widget.grid_remove()
+        if bump or iso or scenario == "csv":
+            self.tire_filter_widget.grid()
+        else:
+            self.tire_filter_widget.grid_remove()
         target_options = tuple(TARGET_LABELS[key] for key in (*corners, "all")) if choices else tuple(TARGET_LABELS.values())
         self.target_widget.configure(values=target_options)
         if self.target.get() not in target_options:

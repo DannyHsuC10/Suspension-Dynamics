@@ -33,7 +33,8 @@ SCENARIOS = {"bump": "凸塊／凹坑", **{key: f"ISO 8608 Class {key[-1].upper(
              "combined": "凸塊＋加速度", "csv": "量測 CSV 回放"}
 BUMP_CASES = ("bump", "combined")
 MANEUVER_CASES = ("maneuver", "combined")
-CASE_DEFAULTS = {"seed": 0, "iso_lateral": False}
+CASE_DEFAULTS = {"seed": 0, "iso_lateral": False, "tire_road_filter": False}
+DEFAULT_TIRE_RADIUS_M = .22
 DEFAULT_DAMPER_SWITCH_SPEED = .1
 DEFAULT_TENDER_COMPRESSION_MM = 4.3
 AERO_DEFAULTS = {"enabled": False, "reference_speed_kmh": 100., "reference_force_n": 500.}
@@ -69,7 +70,7 @@ VEHICLE_FIELDS = {
     "body_twist_c": ("車架扭轉阻尼 (N·m·s/rad)", 0, 1e7),
 }
 TIRE_FIELDS = {"mu": ("簧下質量 (kg)", .01, 1e4), "k": ("輪端剛性 (N/mm)", .01, 1e5),
-               "c": ("輪端阻尼 (N·s/m)", 0, 1e6)}
+               "c": ("輪端阻尼 (N·s/m)", 0, 1e6), "radius": ("輪胎自由半徑 (m)", .01, 5.)}
 CASE_FIELDS = {
     "duration": ("模擬時間 (s)", .001, 120), "dt": ("輸出間隔 (s)", .0001, .05),
     "start": ("輸入開始 (s)", 0, 120), "height": ("凸塊高度 (mm)", -1000, 1000),
@@ -226,7 +227,7 @@ def default_project():
         "vehicle": dict(m=321., lf=.765, lr=.765, tf=1.28, tr=1.24, h_cg=.3, Ixx=60., Iyy=100.,
                         h_rc_f=.025, h_rc_r=.025, dive_front=.15, lift_rear=.15, lift_front=.15,
                         squat_rear=.15, body_twist_k=180000., body_twist_c=300.),
-        "tires": {c: dict(mu=15., k=80., c=300.) for c in CORNERS},
+        "tires": {c: dict(mu=15., k=80., c=300., radius=DEFAULT_TIRE_RADIUS_M) for c in CORNERS},
         "channels": {"heave_f": _four_way_channel(35000, 3350, spring_kind="tender"),
                      "heave_r": _four_way_channel(31500, 3175, spring_kind="tender"),
                      "roll_f": _four_way_channel(20000, 2500), "roll_r": _four_way_channel(18000, 2400),
@@ -383,8 +384,10 @@ def compile_project(project):
     for key, (label, low, high) in VEHICLE_FIELDS.items():
         number(vehicle[key], label, 0 if model != "flex" and key == "body_twist_k" else low, high)
     for corner in CORNERS:
+        tire = project["tires"][corner]
         for key, (label, low, high) in TIRE_FIELDS.items():
-            number(project["tires"][corner][key], f"{corner} {label}", low, high)
+            value = tire.get(key, DEFAULT_TIRE_RADIUS_M) if key == "radius" else tire[key]
+            number(value, f"{corner} {label}", low, high)
     unsprung_mass = sum(project["tires"][c]["mu"] for c in CORNERS)
     if vehicle["m"] <= unsprung_mass:
         raise ValueError("總質量必須大於四輪簧下質量總和。")
@@ -422,6 +425,8 @@ def validate_case(model, sources, case):
         raise ValueError("側向加速度工況適用於全車及 1/2 左右模型。")
     if type(case.get("iso_lateral", CASE_DEFAULTS["iso_lateral"])) is not bool:
         raise ValueError("ISO 路面側向加速度開關設定有誤。")
+    if type(case.get("tire_road_filter", CASE_DEFAULTS["tire_road_filter"])) is not bool:
+        raise ValueError("輪胎接地濾波開關設定有誤。")
     if scenario in BUMP_CASES or scenario in ISO_ROUGHNESS:
         if not set(model_corners(model, sources)).intersection(TARGET_WHEELS[case["target"]]):
             raise ValueError("路面作用輪位不在選定模型的輪位中。")

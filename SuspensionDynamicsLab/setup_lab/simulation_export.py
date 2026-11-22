@@ -6,7 +6,7 @@ from tempfile import NamedTemporaryFile
 
 import numpy as np
 
-from .engine import Cancelled, integrate_samples, output_times, prepare_simulation
+from .engine import Cancelled, integrate_samples, output_times, prepare_simulation, tire_working_radius
 from .project import CHANNELS
 
 
@@ -26,7 +26,8 @@ def export_simulation(project, path, cancel=lambda: False, progress=lambda fract
 
     corner_signals = ("輪端位移 [mm]", "輪端垂直速度 [m/s]", "輪端垂直加速度 [m/s²]",
                       "簧上位移 [mm]", "簧上垂直速度 [m/s]", "簧上垂直加速度 [m/s²]",
-                      "輪端行程 [mm]", "輪荷 [N]", "輪端懸吊力 [N]", "路面高度 [mm]", "路面速度 [m/s]")
+                      "輪端行程 [mm]", "輪荷 [N]", "輪端懸吊力 [N]", "路面高度 [mm]", "路面速度 [m/s]",
+                      "輪胎工作半徑 [mm]")
     channel_signals = ("模態／輪端反力 [N]", "軸心行程 [mm]", "軸心速度 [m/s]",
                        "彈簧力 [N]", "阻尼力 [N]", "限位塊力 [N]")
     header = ("time_s", "縱向加速度 [m/s²]", "側向加速度 [m/s²]", "車速 [m/s]", "模型承受下壓力 [N]",
@@ -52,10 +53,10 @@ def export_simulation(project, path, cancel=lambda: False, progress=lambda fract
                     if cancel():
                         raise Cancelled()
                     progress(.99 * t / road.duration)
-                height, road_velocity, ax, ay = road.at(t)
                 inputs_active = t >= road.replay_start
                 displacement, velocity = state[:n], state[n:]
                 q = equilibrium + displacement
+                height, road_velocity, ax, ay = vehicle.road_inputs(road, t, q, velocity)
                 acceleration, loads, readings, suspension, _ = vehicle.forces(
                     q, velocity, (height, road_velocity, ax, ay), True, include_aero=inputs_active
                 )
@@ -65,10 +66,11 @@ def export_simulation(project, path, cancel=lambda: False, progress=lambda fract
 
                 attitude = (value for i in angles.values()
                             for value in np.rad2deg([displacement[i], velocity[i], acceleration[i]]))
+                working_radii = tire_working_radius(vehicle.tire_radius, loads, vehicle.tire_k)
                 corner_values = zip(
                     displacement[wheel_slice] * 1000, velocity[wheel_slice], acceleration[wheel_slice],
                     vehicle.B @ displacement[:nb] * 1000, vehicle.B @ velocity[:nb], vehicle.B @ acceleration[:nb],
-                    vehicle.travel @ q * 1000, loads, suspension, height * 1000, road_velocity,
+                    vehicle.travel @ q * 1000, loads, suspension, height * 1000, road_velocity, working_radii * 1000,
                 )
                 channels = (value for i, _ in vehicle.active for value in readings[i])
                 speed = road.options["speed"] if inputs_active else 0.

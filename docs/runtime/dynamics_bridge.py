@@ -54,6 +54,7 @@ FIELD_LABELS = {
     "前輪距": "Front track", "後輪距": "Rear track", "重心高度": "CG height", "簧上質量": "Sprung mass",
     "簧上側傾慣量": "Sprung roll inertia", "簧上俯仰慣量": "Sprung pitch inertia", "前側傾中心高度": "Front roll center height",
     "後側傾中心高度": "Rear roll center height", "車架扭轉剛性": "Chassis torsional stiffness", "車架扭轉阻尼": "Chassis torsional damping",
+    "輪胎自由半徑": "Free tire radius", "輪胎工作半徑": "Tire working radius",
     "簧下質量": "Unsprung mass", "輪端剛性": "Wheel-end stiffness", "輪端阻尼": "Wheel-end damping",
     "模擬時間": "Simulation duration", "輸出間隔": "Output interval", "輸入開始": "Input start", "凸塊高度": "Bump height",
     "通過凸塊時間": "Bump traversal time", "路面隨機種子": "Road seed", "加速度上升時間": "Acceleration ramp time",
@@ -111,6 +112,7 @@ MESSAGES = {
     "工況、作用輪位或後軸延遲設定有誤。": "Check the run scenario, selected wheels, and rear delay.",
     "1/4 車請使用凸塊／凹坑、ISO 路面或路面 CSV 回放。": "Choose a bump, ISO road, or CSV replay for the quarter-car model.",
     "側向加速度工況適用於全車及 1/2 左右模型。": "Use a full-car or left/right half-car model for lateral acceleration.",
+    "輪胎接地濾波開關設定有誤。": "The tire road filter option must be a boolean.",
     "ISO 路面側向加速度開關設定有誤。": "The ISO road lateral acceleration option must be a boolean.",
     "路面作用輪位不在選定模型的輪位中。": "Select a road input wheel present in the active model.",
     "ISO 路面及凸塊後輪延遲需要至少 0.1 m/s 的車速。": "ISO road and delayed rear bump inputs require at least 0.1 m/s vehicle speed.",
@@ -317,7 +319,7 @@ def component_curves(project, channel):
     try:
         vehicle, road = prepare_vehicle(project)
         if any(active == index for active, _ in vehicle.active):
-            vehicle.equilibrium(road.at(0.), include_aero=False)
+            vehicle.equilibrium(road.at(0.), include_aero=False, road=road)
             component = next(kc for active, kc in vehicle.active if active == index)
             notes.append(f"No-aero static shaft position {component.static_stroke:.3g} mm.")
         else:

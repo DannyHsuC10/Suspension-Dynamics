@@ -426,6 +426,9 @@ export function mountDynamics(host) {
     }
     aside.append(numberGrid(test, Object.fromEntries(fields.map(key => [key, caseFields[key]])), persistCase));
     if ((bump || iso) && pitch) aside.append(check('Apply wheelbase delay to rear inputs', test.rear_delay, value => { test.rear_delay = value; persistCase(); }));
+    if (bump || iso || test.scenario === 'csv') {
+      aside.append(check('Use tire contact patch moving average', test.tire_road_filter, value => { test.tire_road_filter = value; persistCase(); }));
+    }
     if (iso && roll) aside.append(check('Add lateral acceleration', test.iso_lateral, value => { test.iso_lateral = value; persistCase(); fill(); }));
     if (test.scenario === 'csv') {
       aside.append(localFile('Import road CSV', importRoad));
@@ -826,7 +829,8 @@ export function mountDynamics(host) {
     const corners = el('div', null, 'settings-grid border-section');
     for (const corner of wheelPositions) {
       const wheel = el('section', null, 'stack');
-      wheel.append(el('h3', corner), numberGrid(project.tires[corner], { mu: 'Unsprung mass (kg)', k: 'Vertical stiffness (N/mm)', c: 'Vertical damping (N·s/m)' }));
+      project.tires[corner].radius ??= state.base.tires[corner].radius;
+      wheel.append(el('h3', corner), numberGrid(project.tires[corner], { mu: 'Unsprung mass (kg)', k: 'Vertical stiffness (N/mm)', c: 'Vertical damping (N·s/m)', radius: 'Free tire radius (m)' }));
       corners.append(wheel);
     }
     project.roll_center_frame ??= legacyFrame(project);
