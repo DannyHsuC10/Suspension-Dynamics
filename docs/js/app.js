@@ -1,4 +1,5 @@
-import { mountDynamics } from './dynamics.js';
+const version = new URL(import.meta.url).search;
+const { mountDynamics } = await import(`./dynamics.js${version}`);
 
 const status = document.getElementById('status');
 const app = mountDynamics(document.getElementById('dynamics-workspace'));
