@@ -93,6 +93,9 @@ class Vehicle:
                 self.travel = np.pad(self.travel, ((0, 0), (0, 1)))
         self.n = self.mass.size
         self.axle_travel = self.axle_average @ self.travel
+        allowed = model_channels(model, self.corners)
+        self.active = [(i, component) for i, (key, component) in enumerate(zip(CHANNELS, components))
+                       if key in allowed and component.enabled]
         wheel_map = MODAL[:, wheel_indices]
         self.modal = wheel_map.copy()
         if model == "quarter":
@@ -103,15 +106,17 @@ class Vehicle:
         elif model in ("half_lr", "rigid", "flex"):
             # Heave uses half the sum and Roll half the difference, in both directions of the force map.
             self.modal[:4] *= .5
+        warp_index = tuple(CHANNELS).index("warp")
+        if any(i == warp_index for i, _ in self.active):
+            # Project both axle roll channels onto common roll. Their equal
+            # and opposite travel component is carried by the warp channel.
+            self.modal[2:4] = self.modal[2:4].mean(axis=0)
         self.channel_travel = self.modal @ self.travel
         self.wheel_force_map = self.modal.T.copy()
         if model == "half_fr":
             # Symmetric axle motion drives the shared Heave element at full travel;
             # the selected side receives half of its reaction.
             self.wheel_force_map[:, :2] *= .5
-        allowed = model_channels(model, self.corners)
-        self.active = [(i, component) for i, (key, component) in enumerate(zip(CHANNELS, components))
-                       if key in allowed and component.enabled]
         self.tire_k = np.array([project["tires"][c]["k"] * 1000 for c in self.corners])
         self.tire_c = np.array([project["tires"][c]["c"] for c in self.corners])
         self.tire_radius = np.array([project["tires"][c].get("radius", DEFAULT_TIRE_RADIUS_M) for c in self.corners])

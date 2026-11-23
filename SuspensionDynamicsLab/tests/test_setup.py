@@ -1,5 +1,6 @@
 from copy import deepcopy
 import csv
+import json
 from math import sqrt
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -271,6 +272,40 @@ class ModelTests(unittest.TestCase):
                     _, _, readings, forces, _ = car.forces(q, v, inputs, True)
                     np.testing.assert_allclose(readings[:4, 1], expected_stroke)
                     np.testing.assert_allclose(forces, expected_force)
+
+    def test_enabled_full_car_warp_separates_diagonal_motion_from_roll(self):
+        project = default_project()
+        project["channels"]["roll_f"] = linear(40000., 2000.)
+        project["channels"]["roll_r"] = linear(60000., 3000.)
+        project["channels"]["roll_c"] = linear(10000., 500.)
+        warp = project["channels"]["warp"] = linear(20000., 1000.)
+        warp.update(enabled=False, enabled_models={"full": True})
+        inputs = (np.zeros(4), np.zeros(4), 0., 0.)
+        diagonal = np.array([1., -1., -1., 1.])
+        common_roll = np.array([1., -1., 1., -1.])
+        for model in ("rigid", "flex"):
+            project["model"] = model
+            with self.subTest(model=model):
+                car = Vehicle(project, compile_project(project))
+                q, v = np.zeros(car.n), np.zeros(car.n)
+                q[car.wheels], v[car.wheels] = .001 * diagonal, .01 * diagonal
+                _, _, readings, suspension, _ = car.forces(q, v, inputs, True)
+                np.testing.assert_allclose(readings[:5, :3], 0., atol=1e-12)
+                np.testing.assert_allclose(readings[5, :3], [120., 4., .04])
+                np.testing.assert_allclose(suspension, 120. * diagonal)
+
+                q[car.wheels] = [.002, 0., 0., .002]
+                np.testing.assert_allclose(car.channel_travel[:6] @ q, [.001, .001, 0., 0., 0., .004])
+                q[car.wheels] = .001 * common_roll
+                np.testing.assert_allclose(car.channel_travel[2:6] @ q, [.001, .001, .004, 0.])
+                np.testing.assert_allclose(car.wheel_force_map.T @ diagonal,
+                                           [0., 0., 0., 0., 0., 4., *diagonal])
+
+                warp["enabled_models"]["full"] = False
+                coupled = Vehicle(project, compile_project(project))
+                q[car.wheels] = .001 * diagonal
+                np.testing.assert_allclose(coupled.channel_travel[2:4] @ q, [.001, -.001])
+                warp["enabled_models"]["full"] = True
 
     def test_compression_stop_uses_the_no_aero_static_reference(self):
         project = default_project()
@@ -653,6 +688,7 @@ class ReducedModelTests(unittest.TestCase):
         self.assertNotIn("FL [N]", result.signals)
         p["model_sources"]["half_fr"] = "left"
         self.assertNotEqual(result.signature, simulate(p).signature)
+        self.assertIsInstance(json.dumps(result.signature), str)
 
 
 class QuarterRoadTests(unittest.TestCase):

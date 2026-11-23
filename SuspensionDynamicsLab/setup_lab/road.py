@@ -1,6 +1,7 @@
 """Repeatable proving-ground inputs and measured four-wheel replay."""
 
 from bisect import bisect_right
+from hashlib import sha256
 import math
 
 import numpy as np
@@ -198,8 +199,8 @@ class Road:
     def signature(self):
         o = self.options
         if self.scenario == "csv":
-            return (self.scenario, o["dt"], self.replay_start,
-                    self.times, self.heights.tobytes(), self.acceleration.tobytes())
+            return (self.scenario, o["dt"], self.replay_start, self.times,
+                    sha256(self.heights.tobytes()).hexdigest(), sha256(self.acceleration.tobytes()).hexdigest())
         track = ()
         if self.bump:
             track = (tuple(self.onsets), o["height"], o["period"])
