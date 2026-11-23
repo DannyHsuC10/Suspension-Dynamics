@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 import numpy as np
 
 from setup_lab.components import KCSystem
-from setup_lab.engine import prepare_simulation, prepare_vehicle, simulate, wheel_travel_threshold
+from setup_lab.engine import prepare_simulation, prepare_trim, prepare_vehicle, simulate, wheel_travel_threshold
 from setup_lab.geometry_lookup import read_csv as read_geometry_csv
 from setup_lab.load_transfer import TransferDistribution
 from setup_lab.project import (
@@ -112,11 +112,6 @@ MESSAGES = {
     "工況、作用輪位或後軸延遲設定有誤。": "Check the run scenario, selected wheels, and rear delay.",
     "請為 1/4 車模型選擇路面輸入工況。": "Choose a road input for the quarter-car model.",
     "側向加速度工況適用於全車及 1/2 左右模型。": "Use a full-car or left/right half-car model for lateral acceleration.",
-    "圓形輪胎包絡的理想階躍高度絕對值須小於輪胎自由半徑，否則接觸瞬間的路面速度無界。": (
-        "The magnitude of an ideal step must be below the free tire radius in circular envelope mode. "
-        "The road velocity at contact is otherwise unbounded."
-    ),
-    "輪胎接地濾波方式設定有誤。": "Choose a supported tire road filter method.",
     "輪胎接地濾波開關設定有誤。": "The tire road filter option must be a boolean.",
     "ISO 路面側向加速度開關設定有誤。": "The ISO road lateral acceleration option must be a boolean.",
     "路面作用輪位不在選定模型的輪位中。": "Select a road input wheel present in the active model.",
@@ -328,7 +323,7 @@ def component_curves(project, channel):
     try:
         vehicle, road = prepare_vehicle(project)
         if any(active == index for active, _ in vehicle.active):
-            vehicle.equilibrium(road.at(0.), include_aero=False, road=road)
+            prepare_trim(vehicle, road, include_aero=False)
             component = next(kc for active, kc in vehicle.active if active == index)
             notes.append(f"No-aero static shaft position {component.static_stroke:.3g} mm.")
         else:

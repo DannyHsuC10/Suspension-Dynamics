@@ -56,7 +56,7 @@ def export_simulation(project, path, cancel=lambda: False, progress=lambda fract
                 inputs_active = t >= road.replay_start
                 displacement, velocity = state[:n], state[n:]
                 q = equilibrium + displacement
-                height, road_velocity, ax, ay = vehicle.road_inputs(road, t, q, velocity)
+                height, road_velocity, ax, ay = road.filtered_at(t)
                 acceleration, loads, readings, suspension, _ = vehicle.forces(
                     q, velocity, (height, road_velocity, ax, ay), True, include_aero=inputs_active
                 )

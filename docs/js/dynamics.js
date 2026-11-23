@@ -261,6 +261,7 @@ export function mountDynamics(host) {
       delete project.page_cases.half;
     }
     const family = modelFamily(project.model);
+    delete project.case.tire_road_filter_mode;
     if (project.case.scenario === 'csv' && project.case.recording.length < 2) delete project.page_cases[family];
     else project.page_cases[family] = { model: project.model, case: structuredClone(project.case) };
   }
@@ -422,7 +423,11 @@ export function mountDynamics(host) {
     if ((maneuvers || (iso && test.iso_lateral)) && roll) fields.push('ay');
     if (maneuvers || (iso && test.iso_lateral)) fields.push('ramp');
     const aside = runPanel();
-    aside.append(el('h2', 'Simulation setup'), select('Model', Object.fromEntries(Object.entries(models).filter(([key]) => modelFamily(key) === modelFamily(model))), model, configureModel));
+    aside.append(el('h2', 'Simulation setup'));
+    if (modelFamily(model) === 'full') {
+      const fullModels = Object.fromEntries(Object.entries(models).filter(([key]) => modelFamily(key) === 'full'));
+      aside.append(select('Model', fullModels, model, configureModel));
+    }
     if (sourceOptions[model]) {
       project.model_sources ??= {};
       project.model_sources[model] ??= Object.keys(sourceOptions[model])[0];
@@ -439,15 +444,9 @@ export function mountDynamics(host) {
     aside.append(numberGrid(test, Object.fromEntries(fields.map(key => [key, labels[key]])), persistCase));
     if ((bump || iso) && pitch) aside.append(check('Apply wheelbase delay to rear inputs', test.rear_delay, value => { test.rear_delay = value; persistCase(); }));
     if (targetedRoad || test.scenario === 'csv') {
-      aside.append(check('Use tire road filter', test.tire_road_filter, value => {
-        test.tire_road_filter = value; persistCase(); fill();
+      aside.append(check('Use tire contact patch moving average', test.tire_road_filter, value => {
+        test.tire_road_filter = value; persistCase();
       }));
-      if (test.tire_road_filter) {
-        const modes = { average: 'Contact patch moving average', envelope: 'Circular tire envelope' };
-        aside.append(select('Tire filter method', modes, test.tire_road_filter_mode ?? 'average', value => {
-          test.tire_road_filter_mode = value; persistCase();
-        }));
-      }
     }
     if (iso && roll) aside.append(check('Add lateral acceleration', test.iso_lateral, value => { test.iso_lateral = value; persistCase(); fill(); }));
     if (test.scenario === 'csv') {

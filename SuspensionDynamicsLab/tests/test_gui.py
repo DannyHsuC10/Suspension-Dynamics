@@ -37,6 +37,24 @@ class DesktopTests(unittest.TestCase):
         self.assertIsNone(app.job)
         self.assertIsNotNone(page.result)
 
+    def test_only_the_full_car_page_has_a_model_selector(self):
+        _, app = self.make_app(default_project())
+        for family, page in app.analysis_pages.items():
+            with self.subTest(family=family):
+                controls = page.source_widget.master.winfo_children()
+                labels = [control.cget("text") for control in controls if control.winfo_class() == "TLabel"]
+                selectors = [control for control in controls if control.winfo_class() == "TCombobox"
+                             and str(control.cget("textvariable")) == str(page.model)]
+                if family == "full":
+                    self.assertIn("懸吊模型", labels)
+                    self.assertEqual(len(selectors), 1)
+                    self.assertEqual(set(selectors[0]["values"]), {MODELS["rigid"], MODELS["flex"]})
+                else:
+                    self.assertNotIn("懸吊模型", labels)
+                    self.assertEqual(selectors, [])
+                    self.assertTrue(page.source_widget["values"])
+                    self.assertEqual(page.case_input()["model"], family)
+
     def test_step_is_listed_for_all_models_and_random_only_for_the_quarter_car(self):
         _, app = self.make_app(default_project())
         for family, page in app.analysis_pages.items():
@@ -55,6 +73,7 @@ class DesktopTests(unittest.TestCase):
         project = default_project()
         del project["tires"]["FL"]["radius"]
         del project["case"]["tire_road_filter"]
+        project["case"]["tire_road_filter_mode"] = "envelope"
         _, app = self.make_app(project)
         page = app.analysis_pages["full"]
         self.assertEqual(float(app.tire_vars["FL"]["radius"].get()), .22)
@@ -64,9 +83,7 @@ class DesktopTests(unittest.TestCase):
         collected = app.collect(page, include_pages=True)
         self.assertEqual(collected["tires"]["FL"]["radius"], .25)
         self.assertTrue(collected["case"]["tire_road_filter"])
-        self.assertEqual(collected["case"]["tire_road_filter_mode"], "average")
-        page.tire_filter_mode_widget.current(1)
-        self.assertEqual(app.collect(page)["case"]["tire_road_filter_mode"], "envelope")
+        self.assertNotIn("tire_road_filter_mode", collected["case"])
 
     def test_lap_recording_prompts_before_filling_missing_road_columns(self):
         root, app = self.make_app(default_project())

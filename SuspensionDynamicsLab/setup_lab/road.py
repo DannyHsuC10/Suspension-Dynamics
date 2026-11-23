@@ -7,7 +7,7 @@ import math
 import numpy as np
 
 from .project import BUMP_CASES, CASE_DEFAULTS, CORNERS, TARGETED_ROAD_CASES, TARGET_WHEELS, case_axes
-from .road_profiles import ISO_ROUGHNESS, IsoRoadProfile, RandomRoadProfile, circular_envelope
+from .road_profiles import ISO_ROUGHNESS, IsoRoadProfile, RandomRoadProfile
 
 
 class Road:
@@ -22,8 +22,8 @@ class Road:
         targeted_road = self.scenario in TARGETED_ROAD_CASES
         self.tire_filter = (options.get("tire_road_filter", False) and options["speed"] > 0
                             and (targeted_road or self.scenario == "csv"))
-        self.tire_filter_mode = options.get("tire_road_filter_mode", CASE_DEFAULTS["tire_road_filter_mode"])
         self.filter_tracks = {}
+        self.filter_windows = {}
         self.discontinuities = set()
         command_axes = case_axes(self.scenario, axes, options.get("iso_lateral", CASE_DEFAULTS["iso_lateral"]))
         self.maneuver = any(command_axes)
@@ -47,13 +47,9 @@ class Road:
                 self.filter_tracks = dict.fromkeys(range(self.wheel_count), (0., None))
                 self.quadratic = 3 * self.secants - 2 * self.slopes[:-1] - self.slopes[1:]
                 self.cubic = self.slopes[:-1] + self.slopes[1:] - 2 * self.secants
-                if self.tire_filter_mode == "envelope":
-                    self.curvature = np.maximum(abs(2 * self.quadratic),
-                                                abs(2 * self.quadratic + 6 * self.cubic)) / dt
-                else:
-                    area = dt * (self.heights[:-1] + dt * (
-                        self.slopes[:-1] / 2 + self.quadratic / 3 + self.cubic / 4))
-                    self.integral = np.vstack((np.zeros(self.wheel_count), np.cumsum(area, axis=0)))
+                area = dt * (self.heights[:-1] + dt * (
+                    self.slopes[:-1] / 2 + self.quadratic / 3 + self.cubic / 4))
+                self.integral = np.vstack((np.zeros(self.wheel_count), np.cumsum(area, axis=0)))
             self.events = self.times
             return
 
@@ -90,16 +86,30 @@ class Road:
                 if track not in profiles:
                     profiles[track] = IsoRoadProfile(ISO_ROUGHNESS[self.scenario], self.seed, track=track)
                     if self.tire_filter:
-                        if self.tire_filter_mode == "envelope":
-                            profiles[track].prepare_curvature()
-                        else:
-                            profiles[track].prepare_integral()
+                        profiles[track].prepare_integral()
                 self.iso_onsets.setdefault(start, []).append((index, profiles[track]))
                 if self.tire_filter:
                     self.filter_tracks[index] = (start, profiles[track])
         elif self.tire_filter:
             self.filter_tracks = {index: (start, None) for index, start in self.onsets}
         self.events = tuple(sorted(t for t in boundaries if 0 < t < self.duration))
+
+    def set_filter_windows(self, half_lengths):
+        speed = self.options["speed"]
+        self.filter_windows = {index: float(half_lengths[index]) / speed for index in self.filter_tracks
+                               if half_lengths[index] > 1e-7}
+        if self.scenario == "step":
+            edges = {start + offset * self.filter_windows[index]
+                     for index, start in self.onsets if index in self.filter_windows for offset in (-1, 1)}
+            self.discontinuities.update(edges)
+            self.events = tuple(sorted(set(self.events).union(t for t in edges if 0 < t <= self.duration)))
+
+    def filtered_at(self, time):
+        height, speed, ax, ay = self.at(time)
+        if time >= self.replay_start:
+            for index, half_window in self.filter_windows.items():
+                height[index], speed[index] = self.average(index, time, half_window)
+        return height, speed, ax, ay
 
     def prepend_zero_input(self, seconds):
         """Delay CSV input while keeping its original interpolation."""
@@ -183,9 +193,6 @@ class Road:
             speed = self.options["speed"]
             height, area = profile.height_and_integral(speed * (time - start))
             return height, area / speed
-        if self.scenario == "step":
-            height = self.options["height"] / 1000 if time >= start else 0.
-            return height, max(0., time - start) * height
         if self.scenario == "random":
             height, _, area = self.random_profile.sample(time)
             return height, area
@@ -199,114 +206,20 @@ class Road:
 
     def average(self, index, time, half_window):
         """Return the centered box average and its velocity at fixed window width."""
+        width = 2 * half_window
+        if self.scenario == "step":
+            start, _ = self.filter_tracks[index]
+            left_edge, right_edge = start - half_window, start + half_window
+            height = self.options["height"] / 1000
+            if time < left_edge:
+                return 0., 0.
+            if time >= right_edge:
+                return height, 0.
+            velocity = height / width
+            return velocity * (time - left_edge), velocity
         left, left_area = self._height_and_integral(index, time - half_window)
         right, right_area = self._height_and_integral(index, time + half_window)
-        width = 2 * half_window
         return (right_area - left_area) / width, (right - left) / width
-
-    def configure_envelope_events(self, radii):
-        if not (self.scenario == "step" and self.tire_filter and self.tire_filter_mode == "envelope"):
-            return
-        height = self.options["height"] / 1000
-        transitions = set()
-        for index, start in self.onsets:
-            radius = float(radii[index])
-            rise = abs(height)
-            if rise >= radius:
-                raise ValueError("圓形輪胎包絡的理想階躍高度絕對值須小於輪胎自由半徑，否則接觸瞬間的路面速度無界。")
-            reach = math.sqrt(rise * (2 * radius - rise))
-            transitions.add(start - math.copysign(reach / self.options["speed"], height))
-        self.discontinuities.update(transitions)
-        self.events = tuple(sorted({*self.events, *(t for t in transitions if 0 < t <= self.duration)}))
-
-    def envelope(self, index, time, radius):
-        """Return the circular tire envelope in metres and its time derivative."""
-        start, profile = self.filter_tracks[index]
-        speed = self.options["speed"]
-        if self.scenario == "step":
-            return self._step_envelope(time, start, radius, speed)
-
-        if self.scenario == "csv":
-            time -= self.replay_start
-            knots = self.times
-
-            def sample(offset):
-                t = time + offset / speed
-                i = bisect_right(knots, t) - 1
-                if i < 0 or i == len(knots) - 1:
-                    return self.heights[max(0, i), index], 0.
-                elapsed = t - knots[i]
-                u = elapsed / (knots[i + 1] - knots[i])
-                z, m = self.heights[i, index], self.slopes[i, index]
-                a, b = self.quadratic[i, index], self.cubic[i, index]
-                return z + elapsed * (m + u * (a + u * b)), (m + u * (2 * a + 3 * u * b)) / speed
-
-            def curvature(t):
-                i = bisect_right(knots, t) - 1
-                return float(self.curvature[i, index]) / speed**2 if 0 <= i < len(knots) - 1 else 0.
-        elif self.iso:
-            knots = (start,)
-
-            def sample(offset):
-                distance = speed * (time - start) + offset
-                return profile.at(distance) if distance >= 0 else (0., 0.)
-
-            def curvature(t):
-                return profile.curvature_bound if t > start else 0.
-        elif self.scenario == "random":
-            knots = self.random_profile.times
-
-            def sample(offset):
-                t = time + offset / speed
-                z, m, _ = self.random_profile.sample(min(t, knots[-1]))
-                return z, m / speed
-
-            def curvature(t):
-                return 0.
-        else:
-            period = self.options["period"]
-            omega = math.tau / period
-            scale = self.options["height"] / 2000
-            knots = (start, start + period / 2, start + period)
-
-            def sample(offset):
-                elapsed = time - start + offset / speed
-                if 0 < elapsed < period:
-                    phase = omega * elapsed
-                    return scale * (1 - math.cos(phase)), scale * omega * math.sin(phase) / speed
-                return 0., 0.
-
-            def curvature(t):
-                return abs(scale) * (omega / speed)**2 if start < t < start + period else 0.
-
-        first = bisect_right(knots, time - radius / speed)
-        last = bisect_right(knots, time + radius / speed)
-        offsets = [-radius, *((knot - time) * speed for knot in knots[first:last]), radius]
-        offsets = sorted({min(radius, max(-radius, offset)) for offset in offsets})
-        segments = ((a, b, curvature(time + (a + b) / (2 * speed))) for a, b in zip(offsets, offsets[1:]))
-        height, slope = circular_envelope(sample, segments, radius)
-        return height, speed * slope
-
-    def _step_envelope(self, time, start, radius, speed):
-        step = self.options["height"] / 1000
-        edge = (start - time) * speed
-        if step >= 0:
-            if edge <= 0:
-                return step, 0.
-            if edge > radius:
-                return 0., 0.
-            base, high = 0., step
-        else:
-            if edge >= 0:
-                return 0., 0.
-            if edge < -radius:
-                return step, 0.
-            base, high = step, 0.
-        root = math.sqrt(max(0., (radius - edge) * (radius + edge)))
-        height = high - edge * edge / (radius + root)
-        if height <= base:
-            return base, 0.
-        return height, speed * edge / root if root else 0.
 
     def signature(self):
         o = self.options

@@ -10,7 +10,7 @@ import numpy as np
 from .chart_base import COLORS, Chart
 from .project import (AERO_DEFAULTS, AXES, BUMP_CASES, CASE_DEFAULTS, CASE_FIELDS, CHANNELS, CORNERS, MANEUVER_CASES,
                       MODELS, MODEL_SOURCES, PAGE_MODELS, SCENARIOS, TARGETED_ROAD_CASES,
-                      TARGET_WHEELS, TIRE_ROAD_FILTERS, case_axes, model_corners,
+                      TARGET_WHEELS, case_axes, model_corners,
                       read_recording, save_project)
 from .road_profiles import ISO_ROUGHNESS
 from .vehicle_3d import FullVehicleView
@@ -55,23 +55,18 @@ class AnalysisPage(ttk.Frame):
         self.rear_delay = tk.BooleanVar()
         self.iso_lateral = tk.BooleanVar()
         self.tire_road_filter = tk.BooleanVar()
-        self.tire_road_filter_mode = tk.StringVar()
-        fields = (("懸吊模型", self.models, self.model), ("模型輪位", {}, self.full_source),
-                  ("輸入工況", SCENARIOS, self.scenario), ("作用輪位", TARGET_LABELS, self.target))
+        fields = [("模型輪位", {}, self.full_source), ("輸入工況", SCENARIOS, self.scenario),
+                  ("作用輪位", TARGET_LABELS, self.target)]
+        if len(self.models) > 1:
+            fields.insert(0, ("懸吊模型", self.models, self.model))
+        widgets = []
         for row, (label, choices, variable) in enumerate(fields):
             ttk.Label(setup, text=label).grid(row=row, column=0, sticky="w", pady=4)
-            if row == 0 and len(self.models) == 1:
-                ttk.Label(setup, textvariable=variable).grid(row=row, column=1, sticky="w", pady=4)
-                continue
             widget = option(setup, choices, variable, 24)
             widget.grid(row=row, column=1, sticky="ew", pady=4)
             widget.bind("<<ComboboxSelected>>", lambda event: self.case_mode())
-            if row == 1:
-                self.source_widget = widget
-            if row == 2:
-                self.scenario_widget = widget
-            if row == 3:
-                self.target_widget = widget
+            widgets.append(widget)
+        self.source_widget, self.scenario_widget, self.target_widget = widgets[-3:]
         self.case_vars, self.case_widgets = {}, {}
         hidden_fields = ("ax", "ay", "ramp") if family == "quarter" else ("random_interval",)
         case_fields = {key: spec for key, spec in CASE_FIELDS.items() if key not in hidden_fields}
@@ -89,12 +84,8 @@ class AnalysisPage(ttk.Frame):
                                                   command=self.case_mode)
         self.iso_lateral_widget.grid(row=row, columnspan=2, sticky="w", pady=(0, 5))
         row += 1
-        self.tire_filter_widget = ttk.Checkbutton(setup, text="使用輪胎接地濾波", variable=self.tire_road_filter,
-                                                 command=self.case_mode)
+        self.tire_filter_widget = ttk.Checkbutton(setup, text="使用輪胎接地移動平均濾波", variable=self.tire_road_filter)
         self.tire_filter_widget.grid(row=row, columnspan=2, sticky="w", pady=(0, 5))
-        row += 1
-        self.tire_filter_mode_widget = option(setup, TIRE_ROAD_FILTERS, self.tire_road_filter_mode, 24)
-        self.tire_filter_mode_widget.grid(row=row, columnspan=2, sticky="ew", pady=(0, 5))
         ttk.Button(setup, text="載入路面與加速度 CSV", command=self.load_recording).grid(row=row + 1, columnspan=2, sticky="ew")
         self.recording_label = tk.StringVar()
         ttk.Label(setup, textvariable=self.recording_label, wraplength=275).grid(row=row + 2, columnspan=2, sticky="w", pady=4)
@@ -184,8 +175,6 @@ class AnalysisPage(ttk.Frame):
         self.rear_delay.set(case["rear_delay"])
         self.iso_lateral.set(case.get("iso_lateral", CASE_DEFAULTS["iso_lateral"]))
         self.tire_road_filter.set(case.get("tire_road_filter", CASE_DEFAULTS["tire_road_filter"]))
-        mode = case.get("tire_road_filter_mode", CASE_DEFAULTS["tire_road_filter_mode"])
-        self.tire_road_filter_mode.set(TIRE_ROAD_FILTERS[mode])
         for key, var in self.case_vars.items():
             var.set(case.get(key, CASE_DEFAULTS.get(key)))
         self.recording, self.recording_name = case["recording"], case["recording_name"]
@@ -274,8 +263,8 @@ class AnalysisPage(ttk.Frame):
         case = {**self.case, **values, "scenario": key_for(SCENARIOS, self.scenario.get()),
                 "target": key_for(TARGET_LABELS, self.target.get()), "rear_delay": self.rear_delay.get(),
                 "iso_lateral": self.iso_lateral.get(), "tire_road_filter": self.tire_road_filter.get(),
-                "tire_road_filter_mode": key_for(TIRE_ROAD_FILTERS, self.tire_road_filter_mode.get()),
                 "recording": self.recording, "recording_name": self.recording_name}
+        case.pop("tire_road_filter_mode", None)
         case.pop("quarter_mr", None)
         case.pop("roll_center_frame", None)
         return {"model": self.model_key, "case": case}
@@ -309,15 +298,10 @@ class AnalysisPage(ttk.Frame):
             self.iso_lateral_widget.grid()
         else:
             self.iso_lateral_widget.grid_remove()
-        has_road = targeted_road or scenario == "csv"
-        if has_road:
+        if targeted_road or scenario == "csv":
             self.tire_filter_widget.grid()
         else:
             self.tire_filter_widget.grid_remove()
-        if has_road and self.tire_road_filter.get():
-            self.tire_filter_mode_widget.grid()
-        else:
-            self.tire_filter_mode_widget.grid_remove()
         target_options = tuple(TARGET_LABELS[key] for key in (*corners, "all")) if choices else tuple(TARGET_LABELS.values())
         self.target_widget.configure(values=target_options)
         if self.target.get() not in target_options:

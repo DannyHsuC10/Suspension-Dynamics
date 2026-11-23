@@ -141,56 +141,6 @@ class Vehicle:
         contact = np.minimum(1., penetration / .001)
         return np.maximum(0., self.tire_k * penetration + contact * self.tire_c * (road_velocity - v[self.wheels]))
 
-    def road_inputs(self, road, time, q, v, *, static=False):
-        height, speed, ax, ay = road.at(time)
-        if road.tire_filter and time >= road.replay_start:
-            for index in road.filter_tracks:
-                if road.tire_filter_mode == "envelope":
-                    height[index], speed[index] = road.envelope(index, time, float(self.tire_radius[index]))
-                else:
-                    height[index], speed[index] = self._filter_wheel(
-                        road, time, index, q[self.wheels.start + index], v[self.wheels.start + index],
-                        height[index], speed[index], static=static,
-                    )
-        return height, speed, ax, ay
-
-    def _filter_wheel(self, road, time, index, hub, hub_speed, height, slope, *, static):
-        k, c = float(self.tire_k[index]), float(self.tire_c[index])
-        radius = float(self.tire_radius[index])
-        speed = road.options["speed"]
-        raw = height, slope
-        tolerance = 1e-7  # metres of half-window length
-
-        def half_length(inputs):
-            z, dz_dt = inputs
-            penetration = max(0., z - hub)
-            damping = 0. if static else min(1., penetration / .001) * c * (dz_dt - hub_speed)
-            load = max(0., k * penetration + damping)
-            working_radius = tire_working_radius(radius, load, k)
-            return math.sqrt((radius - working_radius) * (radius + working_radius))
-
-        def average(length):
-            return road.average(index, time, length / speed) if length > tolerance else raw
-
-        # The force and window depend on each other. Solve at the current stage
-        # without carrying state between adaptive integration attempts.
-        length = half_length(raw)
-        for _ in range(8):
-            inputs = average(length)
-            updated = half_length(inputs)
-            if abs(updated - length) <= tolerance:
-                return inputs
-            length = updated
-
-        low, high = 0., radius
-        while high - low > tolerance:
-            length = (low + high) / 2
-            if half_length(average(length)) > length:
-                low = length
-            else:
-                high = length
-        return average((low + high) / 2)
-
     def roll_center_forces(self, ay, axle_travel):
         rc = (self.rc_front * self.geometry.value("h_rc_f", axle_travel)
               + self.rc_rear * self.geometry.value("h_rc_r", axle_travel))
@@ -256,38 +206,32 @@ class Vehicle:
         acceleration = total / self.mass
         return (acceleration, tire, readings, suspension, twist_moment) if details else acceleration
 
-    def equilibrium(self, inputs, *, include_aero=True, road=None):
+    def equilibrium(self, inputs, *, include_aero=True):
         for _, component in self.active:
             component.set_static_reference(None)
         # Locate the stops and Tender transitions from the trim before applying downforce.
         height, speed, ax, ay = inputs
         reference_inputs = (height, speed, 0., 0.) if self.uses_geometry_lookup else inputs
-        reference = self._solve_equilibrium(reference_inputs, include_aero=False, road=road)
+        reference = self._solve_equilibrium(reference_inputs, include_aero=False)
         self.geometry_reference_mm = self.axle_travel @ reference * 1000
         self.tender_reference_wheel_mm = (self.travel @ reference) * 1000
         travel_mm = (self.channel_travel @ reference) * 1000
         for i, component in self.active:
             component.set_static_reference(component.motion_ratio.integrated(travel_mm[i]))
         if (include_aero and self.aero_load) or (self.uses_geometry_lookup and (ax or ay)):
-            return self._solve_equilibrium(inputs, include_aero=include_aero, initial=reference, road=road)
+            return self._solve_equilibrium(inputs, include_aero=include_aero, initial=reference)
         return reference
 
-    def _solve_equilibrium(self, inputs, *, include_aero, initial=None, road=None):
+    def _solve_equilibrium(self, inputs, *, include_aero, initial=None):
         height, _, ax, ay = inputs
         zero_wheel, zero = np.zeros(self.nw), np.zeros(self.n)
         static_input = height, zero_wheel, ax, ay
-
-        def static_inputs(q):
-            if road is not None and road.tire_filter:
-                effective, *_ = self.road_inputs(road, 0., q, zero, static=True)
-                return effective, zero_wheel, ax, ay
-            return static_input
 
         eps = 1e-7
         differences = np.eye(self.n) * eps
 
         def residual(q):
-            return self.forces(q, zero, static_inputs(q), include_aero=include_aero, steady_frame=True) * self.mass
+            return self.forces(q, zero, static_input, include_aero=include_aero, steady_frame=True) * self.mass
 
         def tangent(q):
             return np.column_stack([(residual(q + step) - residual(q - step)) / (2 * eps) for step in differences])
@@ -309,8 +253,7 @@ class Vehicle:
                     physical = self.wheels.stop
                     static_jacobian = jacobian[:physical, :physical]
                     stiffness = -(static_jacobian + static_jacobian.T) / 2
-                    effective, *_ = static_inputs(q)
-                    if np.linalg.eigvalsh(stiffness)[0] > 1e-7 and np.all(self.tire_load(q, zero, effective, zero_wheel) > 0):
+                    if np.linalg.eigvalsh(stiffness)[0] > 1e-7 and np.all(self.tire_load(q, zero, height, zero_wheel) > 0):
                         return q
                     break
                 try:
@@ -367,8 +310,34 @@ class Result:
 def prepare_vehicle(project):
     vehicle = Vehicle(project, compile_project(project))
     road = Road(project["case"], vehicle.wheelbase, vehicle.corners, vehicle.axes)
-    road.configure_envelope_events(vehicle.tire_radius)
     return vehicle, road
+
+
+def prepare_trim(vehicle, road, *, include_aero=True):
+    flat_trim = None
+    if road.tire_filter:
+        zeros = np.zeros(vehicle.nw)
+        try:
+            flat_trim = vehicle.equilibrium((zeros, zeros, 0., 0.), include_aero=include_aero)
+        except EquilibriumError:
+            # A measured uneven road may still admit a stable initial trim.
+            load = vehicle.nominal_load + vehicle.corner_aero if include_aero else vehicle.nominal_load
+        else:
+            load = vehicle.tire_load(flat_trim, np.zeros(vehicle.n), zeros, zeros)
+        radius = vehicle.tire_radius
+        working_radius = tire_working_radius(radius, load, vehicle.tire_k)
+        half_lengths = np.sqrt((radius - working_radius) * (radius + working_radius))
+        road.set_filter_windows(half_lengths)
+
+    if road.scenario == "step":
+        # Start in flat-road trim even when the step is commanded at t = 0.
+        inputs = road.at(math.nextafter(0., -1.))
+    else:
+        inputs = road.filtered_at(0.)
+    height, _, ax, ay = inputs
+    if flat_trim is not None and not height.any() and not (ax or ay):
+        return flat_trim
+    return vehicle.equilibrium(inputs, include_aero=include_aero)
 
 
 def prepare_simulation(project, cancel, notice):
@@ -376,11 +345,7 @@ def prepare_simulation(project, cancel, notice):
     if cancel():
         raise Cancelled()
     try:
-        if road.scenario == "step":
-            # Start in flat-road trim even when the step is commanded at t = 0.
-            equilibrium = vehicle.equilibrium(road.at(math.nextafter(0., -1.)))
-        else:
-            equilibrium = vehicle.equilibrium(road.at(0.), road=road)
+        equilibrium = prepare_trim(vehicle, road)
     except EquilibriumError:
         if road.scenario != "csv":
             raise
@@ -388,7 +353,7 @@ def prepare_simulation(project, cancel, notice):
             raise Cancelled()
         road.prepend_zero_input(REPLAY_LEAD_IN_SECONDS)
         try:
-            equilibrium = vehicle.equilibrium(road.at(0.), include_aero=False, road=road)
+            equilibrium = vehicle.equilibrium(road.at(0.), include_aero=False)
         except EquilibriumError as exc:
             raise EquilibriumError(f"LapData 首筆與零輸入工況皆無法建立靜態平衡。{exc}") from exc
         if cancel():
@@ -446,6 +411,7 @@ def integrate_samples(vehicle, road, equilibrium, time, cancel, *, tolerance=1e-
         if road.duration / limit > max_attempts:
             raise ValueError(f"ISO 路面需要超過 {max_attempts:,} 個積分步，請縮短模擬時間或降低車速。")
     step, attempts, now = min(dt, limit), 0, 0.
+    inputs_at = road.filtered_at if road.filter_windows else road.at
 
     for sample in time:
         event_index = bisect_right(road.events, now + 1e-12)
@@ -468,7 +434,7 @@ def integrate_samples(vehicle, road, equilibrium, time, cancel, *, tolerance=1e-
                 stages[j, :n] = trial[n:]
                 t = last if node == 1. else now + node * h
                 q, v = equilibrium + trial[:n], trial[n:]
-                stages[j, n:] = vehicle.forces(q, v, vehicle.road_inputs(road, t, q, v),
+                stages[j, n:] = vehicle.forces(q, v, inputs_at(t),
                                                include_aero=t >= road.replay_start)
             scale = tolerance * (0.01 + np.maximum(np.abs(state), np.abs(trial)))
             error = float(np.max(np.abs(h * (ERROR @ stages)) / scale))
@@ -478,7 +444,7 @@ def integrate_samples(vehicle, road, equilibrium, time, cancel, *, tolerance=1e-
                 now = end if end - now - h < 1e-12 else now + h
                 state = trial
                 if event_index < len(road.events) and now >= road.events[event_index] - 1e-12:
-                    event_index += 1
+                    event_index = bisect_right(road.events, now + 1e-12, lo=event_index)
             factor = 4. if error == 0. else min(4., max(.15, .9 * error**-.2))
             step = min(limit, h * factor)
         yield sample, state, attempts
@@ -524,7 +490,7 @@ def make_result(vehicle, road, project, equilibrium, time, history, steps, cance
     for i, t in enumerate(time):
         if i % 128 == 0 and cancel():
             raise Cancelled()
-        inputs = vehicle.road_inputs(road, t, q[i], v[i])
+        inputs = road.filtered_at(t)
         roads[i], command[i] = inputs[0], inputs[2:]
         acceleration[i], loads[i], readings[i], suspension[i], twist[i] = vehicle.forces(
             q[i], v[i], inputs, True, include_aero=include_aero[i]
@@ -653,8 +619,7 @@ def make_result(vehicle, road, project, equilibrium, time, history, steps, cance
         warnings.append("模擬結束時，加速度仍未升至設定值。")
     heave_a2 = acceleration[:, 0]**2
     metrics["body_rms"] = math.sqrt(np.sum((heave_a2[1:] + heave_a2[:-1]) * elapsed / 2) / time[-1])
-    filter_mode = road.tire_filter_mode if road.tire_filter else None
-    signature = (project["model"], vehicle.corners, road.signature(), project["case"]["speed"], filter_mode)
+    signature = (project["model"], vehicle.corners, road.signature(), project["case"]["speed"], road.tire_filter)
     # Metres at the body attachment, wheel centre offset and road for each corner.
     motion = np.stack((q[:, :nb] @ vehicle.B.T, q[:, vehicle.wheels], roads), axis=-1)
     return Result(time, signals, groups, project, signature, metrics, warnings, steps, vehicle.corners, motion,

@@ -13,7 +13,7 @@ from .analysis_page import AnalysisPage
 from .aero_page import AeroPage
 from .chart_base import Chart
 from .components import DAMPER_DIRECTIONS, DAMPER_STAGE_COUNTS, KCSystem, damper_kinds
-from .engine import Cancelled, prepare_vehicle, simulate
+from .engine import Cancelled, prepare_trim, prepare_vehicle, simulate
 from .geometry_lookup import VEHICLE_KEYS as GEOMETRY_VEHICLE_KEYS
 from .geometry_page import GeometryPage
 from .load_transfer_page import LoadTransferPage, TireAnalysisPage
@@ -610,7 +610,7 @@ class SetupApp:
         if self.current_channel in self.applicable_channels and channel_enabled(settings, self.analysis.family):
             try:
                 vehicle, road = prepare_vehicle(self.collect())
-                vehicle.equilibrium(road.at(0.), include_aero=False, road=road)
+                prepare_trim(vehicle, road, include_aero=False)
                 channel_index = tuple(CHANNELS).index(self.current_channel)
                 component = next(kc for i, kc in vehicle.active if i == channel_index)
                 notes.append(f"{PAGE_TITLES[self.analysis.family]}無空力靜態軸心 {component.static_stroke:.3g} mm")
