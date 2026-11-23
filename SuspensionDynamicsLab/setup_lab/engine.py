@@ -145,10 +145,13 @@ class Vehicle:
         height, speed, ax, ay = road.at(time)
         if road.tire_filter and time >= road.replay_start:
             for index in road.filter_tracks:
-                height[index], speed[index] = self._filter_wheel(
-                    road, time, index, q[self.wheels.start + index], v[self.wheels.start + index],
-                    height[index], speed[index], static=static,
-                )
+                if road.tire_filter_mode == "envelope":
+                    height[index], speed[index] = road.envelope(index, time, float(self.tire_radius[index]))
+                else:
+                    height[index], speed[index] = self._filter_wheel(
+                        road, time, index, q[self.wheels.start + index], v[self.wheels.start + index],
+                        height[index], speed[index], static=static,
+                    )
         return height, speed, ax, ay
 
     def _filter_wheel(self, road, time, index, hub, hub_speed, height, slope, *, static):
@@ -364,6 +367,7 @@ class Result:
 def prepare_vehicle(project):
     vehicle = Vehicle(project, compile_project(project))
     road = Road(project["case"], vehicle.wheelbase, vehicle.corners, vehicle.axes)
+    road.configure_envelope_events(vehicle.tire_radius)
     return vehicle, road
 
 
@@ -649,7 +653,8 @@ def make_result(vehicle, road, project, equilibrium, time, history, steps, cance
         warnings.append("模擬結束時，加速度仍未升至設定值。")
     heave_a2 = acceleration[:, 0]**2
     metrics["body_rms"] = math.sqrt(np.sum((heave_a2[1:] + heave_a2[:-1]) * elapsed / 2) / time[-1])
-    signature = (project["model"], vehicle.corners, road.signature(), project["case"]["speed"], road.tire_filter)
+    filter_mode = road.tire_filter_mode if road.tire_filter else None
+    signature = (project["model"], vehicle.corners, road.signature(), project["case"]["speed"], filter_mode)
     # Metres at the body attachment, wheel centre offset and road for each corner.
     motion = np.stack((q[:, :nb] @ vehicle.B.T, q[:, vehicle.wheels], roads), axis=-1)
     return Result(time, signals, groups, project, signature, metrics, warnings, steps, vehicle.corners, motion,

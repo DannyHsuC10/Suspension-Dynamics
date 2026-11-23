@@ -61,6 +61,9 @@ class DesktopTests(unittest.TestCase):
         collected = app.collect(page, include_pages=True)
         self.assertEqual(collected["tires"]["FL"]["radius"], .25)
         self.assertTrue(collected["case"]["tire_road_filter"])
+        self.assertEqual(collected["case"]["tire_road_filter_mode"], "average")
+        page.tire_filter_mode_widget.current(1)
+        self.assertEqual(app.collect(page)["case"]["tire_road_filter_mode"], "envelope")
 
     def test_lap_recording_prompts_before_filling_missing_road_columns(self):
         root, app = self.make_app(default_project())

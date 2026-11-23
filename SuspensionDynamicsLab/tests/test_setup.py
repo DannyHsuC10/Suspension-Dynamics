@@ -17,6 +17,7 @@ from setup_lab.project import (CORNERS, compile_project, default_project, import
                                open_project, read_recording, save_project, transfer_options, with_static_tender_travel,
                                with_total_limit_rates)
 from setup_lab.road import Road
+from setup_lab.road_profiles import circular_envelope
 from setup_lab.simulation_export import export_simulation
 
 
@@ -743,6 +744,72 @@ class QuarterRoadTests(unittest.TestCase):
                 self.assertTrue(np.isfinite(filtered.signals["FL [N]"]).all())
                 self.assertNotEqual(raw.signature, filtered.signature)
                 self.assertFalse(np.allclose(raw.signals["路面 FL [mm]"], filtered.signals["路面 FL [mm]"]))
+
+
+class CircularEnvelopeTests(unittest.TestCase):
+    def test_ramp_matches_the_analytic_circle_contact_and_slope(self):
+        radius, gradient = .22, -.35
+        height, slope = circular_envelope(lambda x: (gradient * x, gradient), [(-radius, radius, 0.)], radius)
+        self.assertAlmostEqual(height, radius * (sqrt(1 + gradient**2) - 1), places=12)
+        self.assertAlmostEqual(slope, gradient, places=12)
+
+    def test_step_matches_the_circle_arc_and_keeps_flat_levels(self):
+        case = default_project()["case"]
+        case.update(scenario="step", speed=1., start=.5, height=20.,
+                    tire_road_filter=True, tire_road_filter_mode="envelope")
+        radius = .22
+        for sign in (1, -1):
+            case["height"] = sign * 20.
+            road = Road(case, 1.53, ("FL",))
+            time = .5 - sign * .06
+            root = sqrt(radius**2 - .06**2)
+            expected = (.02 if sign > 0 else 0.) + root - radius
+            actual, velocity = road.envelope(0, time, radius)
+            self.assertAlmostEqual(actual, expected, places=12)
+            self.assertAlmostEqual(velocity, sign * .06 / root, places=12)
+            self.assertEqual(road.envelope(0, 0., radius), (0., 0.))
+            self.assertEqual(road.envelope(0, 1., radius), (sign * .02, 0.))
+
+    def test_continuous_profiles_match_the_dense_geometry_maximum(self):
+        case = default_project()["case"]
+        case.update(speed=5., start=.15, period=.018, height=22.,
+                    tire_road_filter=True, tire_road_filter_mode="envelope", recording=[
+                        [0., 0., 0., 0., 0., 0., 0.], [.141, 0., 0., 0., 0., 0., 0.],
+                        [.153, 19., 0., 0., 0., 0., 0.], [.189, -20., 0., 0., 0., 0., 0.],
+                        [.4, 0., 0., 0., 0., 0., 0.],
+                    ])
+        radius, time = .22, .182
+        offsets = np.linspace(-radius, radius, 8001)
+        for scenario in ("bump", "iso_c", "random", "csv"):
+            with self.subTest(scenario=scenario):
+                road = Road({**case, "scenario": scenario}, 1.53, ("FL",))
+                raw = np.array([road.at(time + offset / case["speed"])[0][0] for offset in offsets])
+                expected = np.max(raw + np.sqrt(radius**2 - offsets**2) - radius)
+                actual, velocity = road.envelope(0, time, radius)
+                self.assertAlmostEqual(actual, expected, places=6)
+                dt = 1e-6
+                left = road.envelope(0, time - dt, radius)[0]
+                right = road.envelope(0, time + dt, radius)[0]
+                self.assertAlmostEqual(velocity, (right - left) / (2 * dt), delta=1e-4)
+
+    def test_simulation_uses_effective_height_for_tire_force(self):
+        project = default_project()
+        project["model"] = "quarter"
+        project["tires"]["FL"]["c"] = 0.
+        project["case"].update(scenario="step", start=.15, duration=.3, height=15.,
+                               tire_road_filter=True, tire_road_filter_mode="envelope")
+        effective = simulate(project)
+        height = effective.signals["路面 FL [mm]"] / 1000
+        hub = effective.motion[:, 0, 1]
+        expected = 80000 * np.maximum(0., height - hub)
+        np.testing.assert_allclose(effective.signals["FL [N]"], expected)
+        pre_step = effective.time < .15
+        self.assertGreater(np.max(height[pre_step]), 0.)
+        project["case"]["tire_road_filter_mode"] = "average"
+        self.assertNotEqual(effective.signature, simulate(project).signature)
+        project["case"].update(height=500., tire_road_filter_mode="envelope")
+        with self.assertRaisesRegex(ValueError, "路面速度無界"):
+            simulate(project)
 
 
 class TireRoadFilterTests(unittest.TestCase):

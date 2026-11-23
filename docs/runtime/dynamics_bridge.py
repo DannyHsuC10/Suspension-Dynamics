@@ -112,6 +112,11 @@ MESSAGES = {
     "工況、作用輪位或後軸延遲設定有誤。": "Check the run scenario, selected wheels, and rear delay.",
     "請為 1/4 車模型選擇路面輸入工況。": "Choose a road input for the quarter-car model.",
     "側向加速度工況適用於全車及 1/2 左右模型。": "Use a full-car or left/right half-car model for lateral acceleration.",
+    "圓形輪胎包絡的理想階躍高度絕對值須小於輪胎自由半徑，否則接觸瞬間的路面速度無界。": (
+        "The magnitude of an ideal step must be below the free tire radius in circular envelope mode. "
+        "The road velocity at contact is otherwise unbounded."
+    ),
+    "輪胎接地濾波方式設定有誤。": "Choose a supported tire road filter method.",
     "輪胎接地濾波開關設定有誤。": "The tire road filter option must be a boolean.",
     "ISO 路面側向加速度開關設定有誤。": "The ISO road lateral acceleration option must be a boolean.",
     "路面作用輪位不在選定模型的輪位中。": "Select a road input wheel present in the active model.",

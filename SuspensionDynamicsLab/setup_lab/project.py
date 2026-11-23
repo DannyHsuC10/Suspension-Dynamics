@@ -35,7 +35,9 @@ BUMP_CASES = ("bump", "combined")
 QUARTER_ONLY_CASES = ("step", "random")
 TARGETED_ROAD_CASES = (*BUMP_CASES, *QUARTER_ONLY_CASES, *ISO_ROUGHNESS)
 MANEUVER_CASES = ("maneuver", "combined")
-CASE_DEFAULTS = {"seed": 0, "random_interval": .02, "iso_lateral": False, "tire_road_filter": False}
+TIRE_ROAD_FILTERS = {"average": "接地移動平均", "envelope": "圓形輪胎包絡"}
+CASE_DEFAULTS = {"seed": 0, "random_interval": .02, "iso_lateral": False,
+                 "tire_road_filter": False, "tire_road_filter_mode": "average"}
 DEFAULT_TIRE_RADIUS_M = .22
 DEFAULT_DAMPER_SWITCH_SPEED = .1
 DEFAULT_TENDER_COMPRESSION_MM = 4.3
@@ -432,6 +434,8 @@ def validate_case(model, sources, case):
         raise ValueError("ISO 路面側向加速度開關設定有誤。")
     if type(case.get("tire_road_filter", CASE_DEFAULTS["tire_road_filter"])) is not bool:
         raise ValueError("輪胎接地濾波開關設定有誤。")
+    if case.get("tire_road_filter_mode", CASE_DEFAULTS["tire_road_filter_mode"]) not in tuple(TIRE_ROAD_FILTERS):
+        raise ValueError("輪胎接地濾波方式設定有誤。")
     if scenario in TARGETED_ROAD_CASES:
         if not set(model_corners(model, sources)).intersection(TARGET_WHEELS[case["target"]]):
             raise ValueError("路面作用輪位不在選定模型的輪位中。")

@@ -440,7 +440,15 @@ export function mountDynamics(host) {
     aside.append(numberGrid(test, Object.fromEntries(fields.map(key => [key, labels[key]])), persistCase));
     if ((bump || iso) && pitch) aside.append(check('Apply wheelbase delay to rear inputs', test.rear_delay, value => { test.rear_delay = value; persistCase(); }));
     if (targetedRoad || test.scenario === 'csv') {
-      aside.append(check('Use tire contact patch moving average', test.tire_road_filter, value => { test.tire_road_filter = value; persistCase(); }));
+      aside.append(check('Use tire road filter', test.tire_road_filter, value => {
+        test.tire_road_filter = value; persistCase(); fill();
+      }));
+      if (test.tire_road_filter) {
+        const modes = { average: 'Contact patch moving average', envelope: 'Circular tire envelope' };
+        aside.append(select('Tire filter method', modes, test.tire_road_filter_mode ?? 'average', value => {
+          test.tire_road_filter_mode = value; persistCase();
+        }));
+      }
     }
     if (iso && roll) aside.append(check('Add lateral acceleration', test.iso_lateral, value => { test.iso_lateral = value; persistCase(); fill(); }));
     if (test.scenario === 'csv') {
