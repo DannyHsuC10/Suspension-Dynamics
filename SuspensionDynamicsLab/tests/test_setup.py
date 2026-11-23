@@ -692,7 +692,7 @@ class ReducedModelTests(unittest.TestCase):
         self.assertIsInstance(json.dumps(result.signature), str)
 
 
-class QuarterRoadTests(unittest.TestCase):
+class StepAndRandomRoadTests(unittest.TestCase):
     def test_step_stays_at_the_selected_height_and_starts_from_flat_trim(self):
         project = default_project()
         project["model"] = "quarter"
@@ -726,24 +726,39 @@ class QuarterRoadTests(unittest.TestCase):
         self.assertIn(.1 + .02, road.events)
         self.assertNotEqual(road.signature(), Road({**case, "seed": 13}, 1.53, ("FL",)).signature())
 
-    def test_new_inputs_are_quarter_only_and_support_contact_patch_filtering(self):
+    def test_random_is_quarter_only_and_supports_moving_average(self):
         project = default_project()
         case = project["case"]
-        case.update(start=.1, duration=.3, height=12.)
-        for scenario in ("step", "random"):
-            with self.subTest(scenario=scenario):
-                case.update(scenario=scenario, tire_road_filter=False)
-                for model in ("flex", "rigid", "half_fr", "half_lr"):
-                    project["model"] = model
-                    with self.assertRaisesRegex(ValueError, "僅適用於"):
-                        compile_project(project)
-                project["model"] = "quarter"
+        case.update(scenario="random", start=.1, duration=.3, height=12.)
+        for model in ("flex", "rigid", "half_fr", "half_lr"):
+            project["model"] = model
+            with self.subTest(model=model), self.assertRaisesRegex(ValueError, "僅適用於"):
+                compile_project(project)
+        project["model"] = "quarter"
+        raw = simulate(project)
+        case["tire_road_filter"] = True
+        filtered = simulate(project)
+        self.assertTrue(np.isfinite(filtered.signals["FL [N]"]).all())
+        self.assertFalse(np.allclose(raw.signals["路面 FL [mm]"], filtered.signals["路面 FL [mm]"]))
+
+    def test_step_targets_the_selected_wheel_in_every_model(self):
+        project = default_project()
+        case = project["case"]
+        case.update(scenario="step", target="FL", start=.163, duration=.28, height=12.)
+        for model in ("quarter", "flex", "rigid", "half_fr", "half_lr"):
+            project["model"] = model
+            with self.subTest(model=model):
+                case["tire_road_filter"] = False
                 raw = simulate(project)
-                case["tire_road_filter"] = True
-                filtered = simulate(project)
-                self.assertTrue(np.isfinite(filtered.signals["FL [N]"]).all())
-                self.assertNotEqual(raw.signature, filtered.signature)
-                self.assertFalse(np.allclose(raw.signals["路面 FL [mm]"], filtered.signals["路面 FL [mm]"]))
+                np.testing.assert_allclose(raw.signals["路面 FL [mm]"], np.where(raw.time >= case["start"], 12., 0.))
+                for mode in ("average", "envelope"):
+                    case.update(tire_road_filter=True, tire_road_filter_mode=mode)
+                    filtered = simulate(project)
+                    before = filtered.time < case["start"]
+                    self.assertGreater(np.max(filtered.signals["路面 FL [mm]"][before]), 0.)
+                    self.assertTrue(np.isfinite(filtered.signals["FL [N]"]).all())
+                    for corner in filtered.corners[1:]:
+                        np.testing.assert_array_equal(filtered.signals[f"路面 {corner} [mm]"], 0.)
 
 
 class CircularEnvelopeTests(unittest.TestCase):

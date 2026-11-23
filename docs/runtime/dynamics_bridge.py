@@ -125,7 +125,7 @@ MESSAGES = {
     "隨機路面節點間隔": "Random road knot interval",
     "隨機路面高度標準差不可小於零。": "The random road height standard deviation must be nonnegative.",
     "隨機路面節點過多，請增加節點間隔。": "Increase the random road knot interval to reduce the number of knots.",
-    "路面階躍與隨機路面僅適用於 1/4 車模型。": "Road step and random road are available for the quarter-car model.",
+    "隨機路面僅適用於 1/4 車模型。": "Random road is available for the quarter-car model.",
     "輸入開始時間須早於模擬結束時間。": "The input start must precede the end of the simulation.",
     "量測檔名格式有誤。": "Invalid CSV replay filename.",
     "車架傳力設定格式有誤。": "Invalid chassis force path settings.",

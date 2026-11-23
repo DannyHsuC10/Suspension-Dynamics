@@ -9,7 +9,7 @@ import numpy as np
 
 from .chart_base import COLORS, Chart
 from .project import (AERO_DEFAULTS, AXES, BUMP_CASES, CASE_DEFAULTS, CASE_FIELDS, CHANNELS, CORNERS, MANEUVER_CASES,
-                      MODELS, MODEL_SOURCES, PAGE_MODELS, QUARTER_ONLY_CASES, SCENARIOS, TARGETED_ROAD_CASES,
+                      MODELS, MODEL_SOURCES, PAGE_MODELS, SCENARIOS, TARGETED_ROAD_CASES,
                       TARGET_WHEELS, TIRE_ROAD_FILTERS, case_axes, model_corners,
                       read_recording, save_project)
 from .road_profiles import ISO_ROUGHNESS
@@ -297,7 +297,7 @@ class AnalysisPage(ttk.Frame):
         scenario_options = tuple(label for key, label in SCENARIOS.items()
                                  if (key not in MANEUVER_CASES or has_ax or has_ay)
                                  and (key != "cornering" or has_ay)
-                                 and (key not in QUARTER_ONLY_CASES or model == "quarter"))
+                                 and (key != "random" or model == "quarter"))
         self.scenario_widget.configure(values=scenario_options)
         if self.scenario.get() not in scenario_options:
             self.scenario.set(SCENARIOS["bump"])
@@ -327,7 +327,7 @@ class AnalysisPage(ttk.Frame):
         active = {"dt", "speed"}
         if scenario != "csv":
             active.update(("duration", "start"))
-        if bump or scenario in QUARTER_ONLY_CASES:
+        if bump or scenario in ("step", "random"):
             active.add("height")
         self.height_label.configure(text={"step": "階躍高度 (mm)", "random": "高度標準差 (mm)"}.get(
             scenario, CASE_FIELDS["height"][0]))

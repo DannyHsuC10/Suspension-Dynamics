@@ -4,8 +4,7 @@ import { buildPlaybackScene } from './dynamics-playback.js';
 import { downloadCsv, downloadPng } from './exports.js';
 
 const models = { flex: 'Full vehicle · 8 DOF, flexible chassis', rigid: 'Full vehicle · 7 DOF, rigid chassis', half_lr: 'Half vehicle · left/right', half_fr: 'Half vehicle · front/rear', quarter: 'Quarter vehicle · 2 DOF' };
-const quarterRoadCases = { step: 'Road step', random: 'Random road' };
-const scenarios = { bump: 'Road bump or dip', ...quarterRoadCases, iso_a: 'ISO 8608 Class A', iso_b: 'ISO 8608 Class B', iso_c: 'ISO 8608 Class C', cornering: 'Lateral acceleration', maneuver: 'Braking, acceleration or cornering', combined: 'Bump with acceleration', csv: 'Recorded CSV replay' };
+const scenarios = { bump: 'Road bump or dip', step: 'Step input', random: 'Random road', iso_a: 'ISO 8608 Class A', iso_b: 'ISO 8608 Class B', iso_c: 'ISO 8608 Class C', cornering: 'Lateral acceleration', maneuver: 'Braking, acceleration or cornering', combined: 'Bump with acceleration', csv: 'Recorded CSV replay' };
 const channels = { heave_f: 'Front heave', heave_r: 'Rear heave', roll_f: 'Front roll', roll_r: 'Rear roll', roll_c: 'Combined roll', warp: 'Diagonal warp', FL: 'FL direct', FR: 'FR direct', RL: 'RL direct', RR: 'RR direct' };
 const wheelPositions = ['FL', 'FR', 'RL', 'RR'];
 const families = { full: 'Full vehicle', half_lr: 'Half left/right', half_fr: 'Half front/rear', quarter: 'Quarter vehicle' };
@@ -402,7 +401,7 @@ export function mountDynamics(host) {
       half_lr: { front: 'Front axle', rear: 'Rear axle' }, half_fr: { left: 'Left side', right: 'Right side' } };
     const scenarioOptions = Object.fromEntries(Object.entries(scenarios).filter(([key]) =>
       (key !== 'cornering' || roll) && (!['maneuver', 'combined'].includes(key) || !quarter)
-      && (!Object.hasOwn(quarterRoadCases, key) || quarter)));
+      && (key !== 'random' || quarter)));
     const bump = ['bump', 'combined'].includes(test.scenario);
     const iso = test.scenario.startsWith('iso_');
     const step = test.scenario === 'step';

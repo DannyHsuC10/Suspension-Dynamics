@@ -28,12 +28,11 @@ MODEL_SOURCES = {"quarter": {c: c for c in CORNERS}, "half_lr": {"front": "前�
 DEFAULT_SOURCES = {model: next(iter(choices)) for model, choices in MODEL_SOURCES.items()}
 AXES = {"rigid": (True, True), "flex": (True, True), "quarter": (False, False),
         "half_lr": (False, True), "half_fr": (True, False)}
-SCENARIOS = {"bump": "凸塊／凹坑", "step": "路面階躍 (Step)", "random": "隨機路面 (Random)", **{key: f"ISO 8608 Class {key[-1].upper()}" for key in ISO_ROUGHNESS},
+SCENARIOS = {"bump": "凸塊／凹坑", "step": "路面階躍 (Step Input)", "random": "隨機路面 (Random)", **{key: f"ISO 8608 Class {key[-1].upper()}" for key in ISO_ROUGHNESS},
              "cornering": "側向加速度（轉彎）", "maneuver": "煞車／加速／轉彎",
              "combined": "凸塊＋加速度", "csv": "量測 CSV 回放"}
 BUMP_CASES = ("bump", "combined")
-QUARTER_ONLY_CASES = ("step", "random")
-TARGETED_ROAD_CASES = (*BUMP_CASES, *QUARTER_ONLY_CASES, *ISO_ROUGHNESS)
+TARGETED_ROAD_CASES = (*BUMP_CASES, "step", "random", *ISO_ROUGHNESS)
 MANEUVER_CASES = ("maneuver", "combined")
 TIRE_ROAD_FILTERS = {"average": "接地移動平均", "envelope": "圓形輪胎包絡"}
 CASE_DEFAULTS = {"seed": 0, "random_interval": .02, "iso_lateral": False,
@@ -426,8 +425,8 @@ def validate_case(model, sources, case):
         raise ValueError("工況、作用輪位或後軸延遲設定有誤。")
     if scenario in MANEUVER_CASES and not any(AXES[model]):
         raise ValueError("請為 1/4 車模型選擇路面輸入工況。")
-    if scenario in QUARTER_ONLY_CASES and model != "quarter":
-        raise ValueError("路面階躍與隨機路面僅適用於 1/4 車模型。")
+    if scenario == "random" and model != "quarter":
+        raise ValueError("隨機路面僅適用於 1/4 車模型。")
     if scenario == "cornering" and not AXES[model][1]:
         raise ValueError("側向加速度工況適用於全車及 1/2 左右模型。")
     if type(case.get("iso_lateral", CASE_DEFAULTS["iso_lateral"])) is not bool:
